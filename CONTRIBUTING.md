@@ -8,6 +8,7 @@ SimaX Database Backup is maintained under Simply Smart X (SimaX). A local web ap
 - Create short-lived branches from current `main`: `docs/<topic>`, `feat/<topic>`, `fix/<topic>`, or `chore/<topic>`.
 - The initial PRD is prepared on `docs/initial-prd`.
 - The initial application is on `feat/web-foundation`, based on `docs/initial-prd` until both changes are reviewed into `main`.
+- Native database validation is on `feat/live-database-roundtrips`, based on `feat/web-foundation` until the preceding milestones are reviewed.
 - Use focused commits with prefixes such as `docs:`, `feat:`, `fix:`, and `chore:`.
 - Submit a pull request explaining the problem, resulting behavior, and relevant validation.
 - Keep changes reviewable; squash merge approved PRs and delete merged branches.
@@ -35,7 +36,7 @@ For new files, stage them before running checks so Git includes them in the trac
 
 ## Requirements and design
 
-Application checks require Python 3.12+ and `requirements-dev.txt`. Run `python -m pytest -q`, `python -m compileall -q simax`, and `node --check simax/static/app.js`. Node is used only for syntax checking. Tests use disposable SQLite catalogs and synthetic adapter output, never production databases.
+Application checks require Python 3.12+ and `requirements-dev.txt`. Run `python -m pytest -q`, `python -m compileall -q simax`, and `node --check simax/static/app.js`. Node is used only for syntax checking. Default tests use disposable SQLite catalogs and synthetic adapter output. Live tests are opt-in through `python scripts/live_tests.py`; follow [native test setup](docs/live-database-validation.md). Never point them at production databases.
 
 If the Windows default temporary directory is unavailable, pass a fresh directory inside `build/` with pytest's `--basetemp`. Pytest may delete its contents; never point this option at user data. Keep browser-test catalogs separate from `data/`.
 

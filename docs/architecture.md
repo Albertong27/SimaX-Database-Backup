@@ -51,6 +51,7 @@ A valid checksum does not make SQL safe. Routines and triggers may execute code 
 - Loopback-only, single trusted local operator. Shared authentication and roles are not implemented.
 - Host validation, same-origin mutation checks, required application header, no CORS, and restrictive CSP.
 - No shell execution for database commands. Conservative validation of connection identifiers.
+- SQL inspection queries are sent as UTF-8 standard input, avoiding Windows argument code-page conversion. PostgreSQL client encoding is explicit; MySQL batch output is raw UTF-8.
 - Only `SIMAX_SECRET_*` credential references are allowed. Inherited database-client overrides are removed; saved identity determines each command.
 - Native tools receive passwords through their environment. The same OS user or an administrator may inspect that environment; a protected credential broker is future work.
 - TLS identity verification is default. Native stderr is not persisted because it can expose SQL, data or credentials.

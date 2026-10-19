@@ -32,7 +32,8 @@ class NativeAdapter:
         env = {k: v for k, v in os.environ.items()
                if not k.startswith(("PG", "MYSQL", "SIMAX_SECRET_"))}
         if source["engine"] == "postgresql":
-            env.update(PGPASSWORD=password, PGSSLMODE=source["tls"], PGCONNECT_TIMEOUT="10")
+            env.update(PGPASSWORD=password, PGSSLMODE=source["tls"], PGCONNECT_TIMEOUT="10",
+                       PGCLIENTENCODING="UTF8")
             if os.environ.get("SIMAX_PG_SSL_ROOT_CERT"):
                 env["PGSSLROOTCERT"] = os.environ["SIMAX_PG_SSL_ROOT_CERT"]
             args = [executable, "--no-password", "--host", source["host"], "--port", str(source["port"]),
@@ -48,12 +49,14 @@ class NativeAdapter:
             if os.environ.get("SIMAX_MYSQL_SSL_CA"):
                 args += ["--ssl-ca=" + os.environ["SIMAX_MYSQL_SSL_CA"]]
             if not export:
-                args += ["--batch", "--skip-column-names", "--binary-mode"]
+                args += ["--batch", "--skip-column-names", "--binary-mode", "--raw"]
         return args, env
 
-    def invoke(self, args, env, *, output=None, input_file=None, timeout=30):
+    def invoke(self, args, env, *, output=None, input_file=None, input_data=None, timeout=30):
         try:
-            result = subprocess.run(args, env=env, stdin=input_file or subprocess.DEVNULL,
+            result = subprocess.run(args, env=env,
+                                    stdin=None if input_data is not None else input_file or subprocess.DEVNULL,
+                                    input=input_data,
                                     stdout=output or subprocess.PIPE, stderr=subprocess.PIPE,
                                     timeout=timeout, shell=False, check=False)
         except subprocess.TimeoutExpired:
@@ -67,11 +70,11 @@ class NativeAdapter:
 
     def query(self, source, sql):
         args, env = self.command(source)
-        if source["engine"] == "postgresql":
-            args += ["-c", sql]
-        else:
-            args += ["--database=" + source["database"], "--execute=" + sql]
-        return self.invoke(args, env)
+        if source["engine"] == "mysql":
+            args += ["--database=" + source["database"]]
+        # Windows native argv uses the active code page. Feed SQL bytes directly so
+        # Unicode identifiers/data survive regardless of the host console locale.
+        return self.invoke(args, env, input_data=(sql + ";\n").encode("utf-8"))
 
     def inspect(self, source):
         version = self.query(source, "SELECT version()")

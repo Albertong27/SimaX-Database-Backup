@@ -2,7 +2,7 @@
 
 A local database backup workspace by **Simply Smart X (SimaX)**, with a web interface and SQLite for configuration, job history, artifacts, and audit events.
 
-**Status: working development preview.** PostgreSQL and MySQL native-tool adapters are implemented; live-engine compatibility and recovery validation are still pending. Source data is not copied into the application's SQLite catalog.
+**Status: working development preview.** Native backup and restore round trips are verified on Windows with PostgreSQL 17.11 and MySQL 8.4.11. See the [tested matrix and limits](docs/live-database-validation.md). Source data is not copied into the application's SQLite catalog.
 
 ## Start locally
 
@@ -32,7 +32,7 @@ Use `python -m simax --port 8765 --data-dir data` to choose a port and runtime d
 
 ## First backup and restore
 
-1. Install `psql` and `pg_dump` for PostgreSQL, or `mysql` and `mysqldump` for MySQL, on the runtime's `PATH`. Adapter preconditions are PostgreSQL 14+ with a matching exporter major version, or MySQL 8.x with InnoDB tables. These are not yet a certified support matrix.
+1. Install `psql` and `pg_dump` for PostgreSQL, or `mysql` and `mysqldump` for MySQL, on the runtime's `PATH`. Adapter preconditions are PostgreSQL 14+ with a matching exporter major version, or MySQL 8.x with InnoDB tables. Only the exact versions in the tested matrix have live verification evidence.
 2. Before starting SimaX, set an environment variable such as `SIMAX_SECRET_ORDERS` to the password using a private terminal or secret manager. Enter only the variable name in the UI. Never commit credentials.
 3. Add a source in **Sources** and run **Check**. TLS identity verification is the default. For private certificate authorities, set `SIMAX_PG_SSL_ROOT_CERT` or `SIMAX_MYSQL_SSL_CA` to the trusted CA file. Unencrypted mode is restricted to loopback development connections.
 4. Create a manual or daily policy, choose a local folder label, then run it. Inspect stages in **Runs** and integrity evidence in **Artifacts**. Quiesce schema changes during export.
@@ -60,6 +60,7 @@ Unsupported execution modes are unavailable in the UI and rejected by the API. T
 - [Product requirements document](docs/PRD.md)
 - [Architecture and operational boundaries](docs/architecture.md)
 - [Implementation status and validation](docs/development-status.md)
+- [Native database tests and compatibility evidence](docs/live-database-validation.md)
 
 - [Contributing and branch workflow](CONTRIBUTING.md)
 - [GitHub publication checklist](docs/github-setup.md)
@@ -77,7 +78,7 @@ python scripts/check_docs.py
 git diff --check
 ```
 
-Tests use real SQLite catalogs and controlled native-tool output. They do not claim live PostgreSQL/MySQL round-trip validation. GitHub Actions runs documentation, Python/JavaScript checks, the tests, and a wheel build on Ubuntu 24.04 after publication.
+The default suite uses real SQLite catalogs and controlled native-tool output; live tests are skipped unless explicitly enabled. `python scripts/live_tests.py` provisions fresh native servers and runs the real round trips when the required binaries are on PATH. It uses no Docker, existing database services, or production connections. See the validation document for Windows setup. GitHub Actions includes the default suite and wheel build on Ubuntu 24.04, plus pinned native database round trips on Windows 2025 after publication.
 
 ## Local access
 
