@@ -53,6 +53,7 @@ function render(){
   $("#navigation").innerHTML=nav.map(([key,label])=>`<a href="#${key}" class="${page===key?"active":""}" ${page===key?'aria-current="page"':""}>${icon(key)}${label}</a>`).join("");
   const views={overview,policies:()=>id?policyForm(id):policies(),sources,runs:()=>id?runDetail(id):runs(),artifacts,restore:()=>restorePage(id),audit,settings:()=>settings(id)};
   $("#main").innerHTML=(views[page]||overview)();
+  if($("#policy-form"))updateScheduleVisibility($("#policy-form"));
   document.title=`${nav.find(n=>n[0]===page)?.[1]||"Overview"} · SimaX`;
 }
 function latestArtifact(id){return state.artifacts.filter(a=>a.source_id===id).sort((a,b)=>b.snapshot.localeCompare(a.snapshot))[0];}
@@ -102,12 +103,51 @@ function sourceDialog(id){
 function policies(){
   let html=header("Backup policies","Define what is captured, when it runs, and where the recovery copy is stored. Every run records the policy revision it used.",link("New backup policy","#policies/new",true));
   html+=state.policies.length?table(["Policy","Source","Trigger","Destination","State","Actions"],state.policies.map(p=>row([
-    `<a href="#policies/${p.id}"><strong>${esc(p.name)}</strong></a><small class="mono">Revision ${p.revision}</small>`,esc(sourceById(p.source_id)?.name||p.source_id),p.trigger==="daily"?`Daily at ${p.time}<small>${esc(p.timezone)}</small>`:"Manual",`Local / ${esc(p.destination)}<small>Single SQL file · whole database</small>`,chip(p.enabled?"Enabled":"Paused",p.enabled?"ok":"mute"),`<div class="actions">${button("Run now","policy-run",p.id,true,true)}${button(p.enabled?"Pause":"Enable","policy-toggle",p.id,false,true)}</div>`
+    `<a href="#policies/${p.id}"><strong>${esc(p.name)}</strong></a><small class="mono">Revision ${p.revision}</small>`,esc(sourceById(p.source_id)?.name||p.source_id),scheduleLabel(p),`Local / ${esc(p.destination)}<small>Single SQL file · whole database</small>`,chip(p.enabled?"Enabled":"Paused",p.enabled?"ok":"mute"),`<div class="actions">${button("Run now","policy-run",p.id,true,true)}${button(p.enabled?"Pause":"Enable","policy-toggle",p.id,false,true)}</div>`
   ]))):`<div class="panel">${empty("Give your backups a plan","A policy connects a database to its schedule and backup destination. Start with a manual run so you can inspect the result.",link("Create first policy","#policies/new",true),"policies")}</div>`;
-  return html+notice("What this first release can execute","PostgreSQL/MySQL whole-database SQL exports to one local destination, triggered manually or once daily. Advanced object selection, other formats, event triggers and remote destinations are planned.");
+  return html+notice("What this first release can execute","PostgreSQL/MySQL whole-database SQL exports to one local destination, triggered manually or by daily, weekly and cron schedules. Advanced object selection, other formats, event triggers and remote destinations are planned.");
 }
 function formSection(number,title,body){return `<section class="panel form-section"><div class="form-heading"><span class="step">${number}</span><h2>${title}</h2></div>${body}</section>`;}
-function policyPayload(p){return Object.fromEntries(["name","source_id","destination","trigger","time","timezone","enabled"].map(k=>[k,p[k]]));}
+function policyPayload(p){return Object.fromEntries(["name","source_id","destination","trigger","time","timezone","weekdays","cron","enabled"].map(k=>[k,p[k]]));}
+const weekdayNames=["Mon","Tue","Wed","Thu","Fri","Sat","Sun"];
+function scheduleLabel(p){
+  if(p.trigger==="manual")return "Manual";
+  const label=p.trigger==="cron"?`Cron: ${p.cron}`:p.trigger==="weekly"?`${(p.weekdays||[0]).map(d=>weekdayNames[d]).join(", ")} at ${p.time}`:`Daily at ${p.time}`;
+  return `${esc(label)}<small>${esc(p.timezone)}</small>`;
+}
+function scheduleFields(p){return `<div class="fields">${select("Trigger","trigger",[["manual","Manual only"],["daily","Daily schedule"],["weekly","Weekly schedule"],["cron","Cron schedule"]],p.trigger)}${select("Policy state","enabled",[["true","Enabled"],["false","Paused"]],String(p.enabled))}</div>
+  <div data-schedule="daily weekly" ${["daily","weekly"].includes(p.trigger)?"":"hidden"}>${field("Local time","time",p.time,"time","required")}</div>
+  <fieldset class="weekdays" data-schedule="weekly" ${p.trigger==="weekly"?"":"hidden"}><legend>Days of the week</legend>${weekdayNames.map((label,i)=>`<label><input type="checkbox" name="weekdays" value="${i}" ${(p.weekdays||[0]).includes(i)?"checked":""}>${label}</label>`).join("")}</fieldset>
+  <div data-schedule="cron" ${p.trigger==="cron"?"":"hidden"}>${field("Cron expression","cron",p.cron||"0 3 * * *","text",'maxlength="256"',"Minute · hour · day of month · month · day of week (0 or 7 = Sunday). Numbers, *, lists, ranges and steps. Example: 0 */6 * * * runs every six hours.")}<p class="sub">When both day fields are restricted, either may match.</p></div>
+  <div data-schedule="daily weekly cron" ${p.trigger==="manual"?"hidden":""}>${field("Time zone","timezone",p.timezone,"text","required","IANA zone, such as Asia/Jakarta or Europe/London.")}<div class="schedule-preview"><div class="actions">${button("Preview upcoming runs","schedule-preview")}<span class="sub">Preview does not save or start a backup.</span></div><div id="schedule-preview" role="status" aria-live="polite">Preview the next five occurrences before saving.</div></div></div>
+  <p class="sub">After downtime, only the latest due occurrence from today in this time zone is queued. Earlier days are skipped. Repeated daylight-saving times run once at the first occurrence; nonexistent times are skipped. An occurrence during an active backup is coalesced. Edits take effect for future occurrences; pausing does not cancel queued jobs.</p>
+  <div class="option-row">${["Table change","Database change","Webhook","MQTT / Redis"].map(x=>`<div class="option disabled"><span>${x}<small>Planned</small></span></div>`).join("")}</div>`;}
+function schedulePayload(form){
+  const values=new FormData(form);
+  return {trigger:values.get("trigger"),time:values.get("time")??"03:00",timezone:values.get("timezone")??state.settings.timezone,cron:values.get("cron")??"0 3 * * *",weekdays:values.getAll("weekdays").map(Number)};
+}
+function updateScheduleVisibility(form){
+  const trigger=form.elements.trigger.value;
+  for(const area of form.querySelectorAll("[data-schedule]")){
+    area.hidden=!area.dataset.schedule.split(" ").includes(trigger);
+    for(const input of area.querySelectorAll("input"))input.disabled=area.hidden;
+  }
+}
+function invalidateSchedule(form){
+  form.dataset.scheduleVersion=String(Number(form.dataset.scheduleVersion||0)+1);
+  updateScheduleVisibility(form);
+  form.querySelector("#schedule-preview").textContent="Schedule changed. Preview upcoming runs again.";
+}
+async function previewSchedule(button){
+  const form=button.closest("form"), version=form.dataset.scheduleVersion||"0", output=form.querySelector("#schedule-preview");
+  button.disabled=true;output.textContent="Calculating upcoming runs…";
+  try{
+    const result=await api("/schedules/preview","POST",schedulePayload(form));
+    if(!form.isConnected||(form.dataset.scheduleVersion||"0")!==version)return;
+    output.innerHTML=`<p>Upcoming occurrences in ${esc(result.timezone)} (with UTC offset)${form.elements.enabled.value==="false"?". This policy is paused":""}:</p><ol>${result.occurrences.map(o=>`<li><time datetime="${esc(o.utc)}">${esc(o.local.replace("T"," "))}</time></li>`).join("")}</ol>${result.occurrences.length<5?`<p>Only ${result.occurrences.length} occurrences fall within the next ${result.horizon_years} years.</p>`:""}<p class="sub">Planned times; actual execution depends on runtime availability and the queue.</p>`;
+  }catch(error){if(form.isConnected&&(form.dataset.scheduleVersion||"0")===version)output.textContent=error.message;}
+  finally{button.disabled=false;}
+}
 function policyForm(id){
   const p=policyById(id)||{name:"",source_id:"",destination:"local",trigger:"manual",time:"03:00",timezone:state.settings.timezone,enabled:true};
   const eligible=state.sources.filter(s=>s.role==="source"&&["postgresql","mysql"].includes(s.engine));
@@ -115,7 +155,7 @@ function policyForm(id){
   return '<a class="breadcrumbs" href="#policies">← Policies</a>'+header(id==="new"?"New backup policy":"Edit backup policy","A policy defines what is captured, what starts it and where the recovery copy goes. Changes create a new revision.")+`<form id="policy-form" data-id="${id==="new"?"":esc(id)}" class="form-layout"><div class="stack">`+
     formSection("01","Source",`<div class="fields">${field("Policy name","name",p.name,"text",'required maxlength="80" placeholder="nightly-orders"')}${select("Source connection","source_id",eligible.map(s=>[s.id,`${s.name} · ${engines[s.engine]}`]),p.source_id,"required")}</div>`)+
     formSection("02","What to capture",`<div class="option selected"><span>${icon("sources")}</span><span><strong>Whole database</strong><small>Schema and data, including database-local routines and triggers supported by the native export tool. Objects added later are included.</small></span></div>${notice("Review the scope","PostgreSQL ownership and grants, roles, tablespaces and other cluster objects are excluded. MySQL definers may require matching accounts. Schema changes must be quiesced during export.")}<p class="sub">Schema and individual object selection will be added after dependency handling is validated.</p>`)+
-    formSection("03","What starts a backup",`<div class="fields">${select("Trigger","trigger",[["manual","Manual only"],["daily","Daily schedule"]],p.trigger)}${field("Daily time","time",p.time,"time","required")}${field("Time zone","timezone",p.timezone,"text","required", "IANA zone, such as Asia/Jakarta or Europe/London.")}${select("Policy state","enabled",[["true","Enabled"],["false","Paused"]],String(p.enabled))}</div><p class="sub">After downtime, today's due run is queued once; previous days are skipped. A repeated daylight-saving time runs once; a nonexistent time is skipped. Concurrent events are coalesced into the active backup.</p><div class="option-row">${["Table change","Database change","Webhook","MQTT / Redis"].map(x=>`<div class="option disabled"><span>${x}<small>Planned</small></span></div>`).join("")}</div>`)+
+    formSection("03","What starts a backup",scheduleFields(p))+
     formSection("04","Output format",`<div class="option selected"><span><strong>Single SQL file</strong><small>One SQL payload with a companion JSON manifest recording source version, checksum, table inventory and recovery limitations.</small></span></div><div class="option-row"><div class="option disabled"><span>Multiple SQL files<small>Planned</small></span></div><div class="option disabled"><span>Encrypted SimaX binary<small>Planned</small></span></div></div>`)+
     formSection("05","Where the copy goes",`${field("Local destination folder","destination",p.destination,"text",'required pattern="[a-zA-Z0-9][a-zA-Z0-9_-]{0,63}"',"Folder label inside the managed backup directory. Each run gets its own immutable directory.")}<p class="sub mono">${esc(state.data_directory)} / backups / &lt;folder&gt; / &lt;run&gt;</p>${notice("One required local copy","Complete means the SQL export and manifest are finalized, and the local file is integrity-checked. FTP, SFTP, AWS S3 and Google Cloud Storage are planned.")}`)+
     formSection("06","Retention",`<p>Backups are kept until you remove them manually outside SimaX. Automatic retention, deletion previews and pinning are planned.</p>${notice("No automatic deletion","Monitor free disk space. This first release never deletes completed backup files automatically.","warning")}`)+
@@ -133,7 +173,7 @@ function runDetail(id){
   const actions=r.status==="queued"?button("Cancel queued run","run-cancel",id):r.kind==="backup"&&["failed","interrupted"].includes(r.status)?button("Run a new backup","policy-run",r.policy.id,true):r.artifact_id?link("View artifacts","#artifacts"):"";
   let html='<a class="breadcrumbs" href="#runs">← All runs</a>'+header(r.id,`${r.source.name} · ${engines[r.source.engine]} · ${r.origin}`,actions);
   html+=`<div class="actions">${chip(r.status,["failed","interrupted"].includes(r.status)?"bad":r.status==="succeeded"?"ok":"mute")}${env(r.source)}<span class="sub">${r.kind==="backup"?"Backup":"Restore"} · ${formatDate(r.created)}</span></div>`;
-  html+=`<div class="detail-grid"><section class="panel stack"><h2>${r.error?"What happened":"Execution details"}</h2>${r.error?notice("Operation did not complete",r.error,"error"):notice("Current stage",r.stage)}<dl class="detail-list"><dt>Started</dt><dd>${formatDate(r.started)}</dd><dt>Finished</dt><dd>${formatDate(r.finished)}</dd><dt>Database</dt><dd>${esc(r.source.database)}</dd><dt>Correlation</dt><dd class="mono">${esc(r.id)}</dd></dl><p class="sub">Raw native-tool output is withheld because it may contain credentials, SQL or database rows.</p></section><section class="panel stack"><h2>Recovery point impact</h2><p>${r.kind==="restore"?"A completed replay records table-inventory evidence only. Validate restored data and application behavior separately.":"Only finalized artifacts appear in the catalog. Failed exports never advance the latest recovery point."}</p>${r.policy?`<p class="sub">Policy snapshot: ${esc(r.policy.name)} r${r.policy.revision}. A new run uses the current policy revision.</p>`:""}</section></div>`;
+  html+=`<div class="detail-grid"><section class="panel stack"><h2>${r.error?"What happened":"Execution details"}</h2>${r.error?notice("Operation did not complete",r.error,"error"):notice("Current stage",r.stage)}<dl class="detail-list"><dt>Scheduled for</dt><dd>${r.scheduled_for?esc(r.scheduled_for):"Manual request"}</dd><dt>Started</dt><dd>${formatDate(r.started)}</dd><dt>Finished</dt><dd>${formatDate(r.finished)}</dd><dt>Database</dt><dd>${esc(r.source.database)}</dd><dt>Correlation</dt><dd class="mono">${esc(r.id)}</dd></dl><p class="sub">Raw native-tool output is withheld because it may contain credentials, SQL or database rows.</p></section><section class="panel stack"><h2>Recovery point impact</h2><p>${r.kind==="restore"?"A completed replay records table-inventory evidence only. Validate restored data and application behavior separately.":"Only finalized artifacts appear in the catalog. Failed exports never advance the latest recovery point."}</p>${r.policy?`<p class="sub">Policy snapshot: ${esc(r.policy.name)} r${r.policy.revision}. A new run uses the current policy revision.</p>`:""}</section></div>`;
   html+=section("Timeline",r.events.length?table(["Time","Stage"],r.events.map(e=>row([formatDate(e.time),esc(e.stage)]))):`<div class="panel">${empty("Waiting to start","The runtime processes one job at a time. You can cancel this job while it is queued.","","runs")}</div>`);
   return html;
 }
@@ -167,7 +207,7 @@ function audit(){
 function settings(tab="general"){
   let html=header("Settings","Workspace preferences, runtime capabilities and recovery boundaries.")+`<div class="tabs">${[["general","General"],["capabilities","Capabilities"],["keys","Encryption keys"],["roles","Alerts and roles"]].map(([id,label])=>`<a class="${tab===id?"active":""}" href="#settings/${id}">${label}</a>`).join("")}</div>`;
   if(tab==="general")return html+`<form id="settings-form" class="panel form-section settings-width"><h2>Time and freshness</h2><div class="fields">${field("Display time zone","timezone",state.settings.timezone,"text","required")}${field("Recovery point limit (hours)","recovery_limit_hours",state.settings.recovery_limit_hours,"number",'required min="1" max="8760"')}${field("Restore evidence limit (days)","restore_test_limit_days",state.settings.restore_test_limit_days,"number",'required min="1" max="3650"')}</div><p class="sub">Limits produce attention notices in the overview. Email and outgoing webhook delivery are not yet available.</p><p class="error-text form-error" role="alert"></p><div class="actions"><button type="submit" class="button primary">Save preferences</button>${button("Toggle light / dark","theme")}</div></form><section class="panel padded settings-width stack"><h2>Local runtime</h2><dl class="detail-list"><dt>Version</dt><dd>${esc(state.version)} · Development preview</dd><dt>Catalog</dt><dd>SQLite · schema version 1</dd><dt>Data directory</dt><dd class="mono">${esc(state.data_directory)}</dd><dt>Access</dt><dd>Loopback only · single local operator</dd></dl></section>`;
-  if(tab==="capabilities")return html+section("Native tools",table(["Engine","Client","Exporter","Execution"],Object.entries(state.tools).map(([engine,tools])=>row([engines[engine],...Object.entries(tools).map(([name,found])=>`${chip(found?"Found":"Not installed",found?"ok":"warn")}<small class="mono">${esc(name)}</small>`),"Development adapter"])) ))+section("Delivery status",table(["Capability","This release"],[row(["Application storage","SQLite catalog; native databases remain the backup sources"]),row(["PostgreSQL / MySQL","Whole-database SQL export and guarded replay; live engine validation pending"]),row(["Oracle / SQL Server","Connection records only; execution planned"]),row(["Triggers","Manual and daily schedule; change/webhook/MQTT/Redis planned"]),row(["Destinations","One required local copy; FTP/SFTP/S3/GCS planned"]),row(["Formats","Single SQL plus manifest; split SQL and encryption planned"]),row(["Restore","Empty disposable target; table inventory check; data/behavior checks remain manual"]),row(["Lifecycle","No automated retention, catalog import or active-run cancellation yet"])]));
+  if(tab==="capabilities")return html+section("Native tools",table(["Engine","Client","Exporter","Execution"],Object.entries(state.tools).map(([engine,tools])=>row([engines[engine],...Object.entries(tools).map(([name,found])=>`${chip(found?"Found":"Not installed",found?"ok":"warn")}<small class="mono">${esc(name)}</small>`),"Development adapter"])) ))+section("Delivery status",table(["Capability","This release"],[row(["Application storage","SQLite catalog; native databases remain the backup sources"]),row(["PostgreSQL / MySQL","Whole-database SQL export and guarded replay; PostgreSQL 17.11 / MySQL 8.4.11 verified on Windows"]),row(["Oracle / SQL Server","Connection records only; execution planned"]),row(["Triggers","Manual, daily, weekly and five-field cron; change/webhook/MQTT/Redis planned"]),row(["Destinations","One required local copy; FTP/SFTP/S3/GCS planned"]),row(["Formats","Single SQL plus manifest; split SQL and encryption planned"]),row(["Restore","Empty disposable target; table inventory check; data/behavior checks remain manual"]),row(["Lifecycle","No automated retention, catalog import or active-run cancellation yet"])]));
   if(tab==="keys")return html+notice("Encrypted backup format is planned","This release writes plain SQL files. Store them on a protected volume with appropriate filesystem permissions. There are no encryption keys managed by this application yet.","warning")+`<section class="panel padded stack settings-width"><h2>Recovery requirements</h2><p>The future SimaX binary format will be authenticated and versioned. Key recovery, rotation and compatibility must be validated before encrypted output is enabled.</p><p class="sub">If the only valid key is lost, encrypted backups may be unrecoverable. A copy held only inside the application is not a recovery plan.</p></section>`;
   return html+notice("Single local operator","This release has no shared sign-in or role-based access. Keep the service on 127.0.0.1; do not publish it through a proxy or tunnel.","warning")+`<div class="two-columns"><section class="panel padded stack"><h2>Alerts</h2><p>Connection failures, missing backups and stale recovery evidence appear in the overview. Outgoing email and webhook notifications are planned.</p><a href="#settings/general">Configure freshness limits →</a></section><section class="panel padded stack"><h2>Roles</h2><p>Administrator, operator and read-only access are defined in the PRD. Authentication and server-enforced role permissions will be implemented before shared operation is supported.</p><p class="sub">This preview blocks restores to production and requires an empty disposable target.</p></section></div>`;
 }
@@ -176,6 +216,7 @@ document.addEventListener("click",async event=>{
   const b=event.target.closest("[data-action]");if(!b)return;
   const {action,id}=b.dataset;
   if(action==="close"){ $("#dialog").close();return; }
+  if(action==="schedule-preview"){await previewSchedule(b);return;}
   if(action==="source-new"||action==="source-edit"){sourceDialog(id);return;}
   if(action==="theme"){document.documentElement.classList.toggle("dark");localStorage.setItem("simax-theme",document.documentElement.classList.contains("dark")?"dark":"light");return;}
   b.disabled=true;
@@ -186,6 +227,10 @@ document.addEventListener("click",async event=>{
     if(action==="run-cancel"){await api(`/runs/${id}/cancel`,"POST");toast("Queued run cancelled.");}
     await refresh();
   }catch(error){toast(error.message);}finally{b.disabled=false;}
+});
+document.addEventListener("input",event=>{
+  const form=event.target.closest("#policy-form");
+  if(form&&["trigger","time","timezone","weekdays","cron","enabled"].includes(event.target.name))invalidateSchedule(form);
 });
 document.addEventListener("change",event=>{
   const el=event.target;
@@ -209,7 +254,7 @@ document.addEventListener("submit",async event=>{
       await api(id?`/sources/${id}`:"/sources",id?"PUT":"POST",data);
       $("#dialog").close();await refresh();toast("Connection saved. Run preflight before the first backup.");
     }else if(form.id==="policy-form"){
-      data.enabled=data.enabled==="true";delete data.intent;
+      Object.assign(data,schedulePayload(form));data.enabled=data.enabled==="true";delete data.intent;
       const id=form.dataset.id,p=await api(id?`/policies/${id}`:"/policies",id?"PUT":"POST",data);
       await refresh(false);
       if(submitter.value==="run"){

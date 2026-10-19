@@ -11,6 +11,7 @@ The interface follows the supplied PDF and HTML: Schibsted Grotesk text, JetBrai
 | `simax/models.py` | Strict request validation and supported configuration modes |
 | `simax/db.py` | SQLite schema, transactions, records and audit events |
 | `simax/adapters.py` | Native PostgreSQL/MySQL inspection, export and replay |
+| `simax/schedules.py` | Shared schedule calculation, bounded cron parsing and previews |
 | `simax/service.py` | Scheduling, queue execution, policy snapshots, finalization and authorization |
 | `simax/app.py` | Local HTTP boundary, API routes and static assets |
 | `simax/static/` | Forms, navigation, tables, filters and visual styles |
@@ -21,7 +22,9 @@ The interface follows the supplied PDF and HTML: Schibsted Grotesk text, JetBrai
 
 One runtime owns the catalog using an OS file lock; one worker serializes backup and restore jobs. Accepted jobs are persisted before acknowledgment. Restart marks previously running work interrupted and resumes queued work. Allow active native operations to finish before stopping the server. A hard stop can leave partial files or partial restore effects; inspect them before retrying.
 
-Daily schedules use IANA zones and one durable occurrence key per policy/day. Repeated DST times run once at the first occurrence; nonexistent times are skipped. Today's due run can catch up after downtime; earlier days do not. Creating or editing a policy after today's scheduled time takes effect next day. An occurrence during an active backup coalesces into that job and is audited. Pausing prevents new enqueues; accepted jobs remain queued unless cancelled.
+Daily, weekly and numeric five-field cron schedules share the same IANA wall-clock calculator for previews and execution. Repeated DST times run once at the first occurrence; nonexistent times are skipped. Only the latest due occurrence from the current local day can catch up after downtime. An edit's timestamp excludes earlier occurrences. Enqueue rechecks the policy revision within the SQLite transaction to reject a stale scheduler snapshot.
+
+Occurrence keys persist across restarts. Daily/weekly policies use policy/day keys, preserving existing daily records; cron policies use policy/UTC-instant keys. An occurrence during an active backup for the source coalesces into that job and is audited. Scheduled jobs record their intended UTC time. Pausing prevents new enqueues; accepted jobs remain queued unless cancelled. The preview endpoint is read-only and searches up to eight years for up to five future occurrences. See [scheduling rules](scheduling.md).
 
 ## Backup completion
 

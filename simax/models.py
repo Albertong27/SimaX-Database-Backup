@@ -1,7 +1,9 @@
 from typing import Literal
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
+
+from .schedules import parse_cron
 
 
 class Input(BaseModel):
@@ -21,14 +23,27 @@ class Source(Input):
     tls: Literal["verify-full", "disable"] = "verify-full"
 
 
-class Policy(Input):
-    name: str = Field(min_length=1, max_length=80)
-    source_id: str
-    destination: str = Field(default="local", pattern=r"^[a-zA-Z0-9][a-zA-Z0-9_-]{0,63}$")
-    trigger: Literal["manual", "daily"] = "manual"
+class Schedule(Input):
+    trigger: Literal["manual", "daily", "weekly", "cron"] = "manual"
     time: str = Field(default="03:00", pattern=r"^(?:[01][0-9]|2[0-3]):[0-5][0-9]$")
     timezone: str = "Asia/Jakarta"
-    enabled: bool = True
+    weekdays: list[int] = Field(default_factory=lambda: [0], max_length=7)
+    cron: str = Field(default="0 3 * * *", max_length=256)
+
+    @field_validator("weekdays")
+    @classmethod
+    def valid_weekdays(cls, value):
+        if any(day < 0 or day > 6 for day in value) or len(set(value)) != len(value):
+            raise ValueError("Choose unique weekdays from Monday (0) to Sunday (6).")
+        return sorted(value)
+
+    @model_validator(mode="after")
+    def valid_schedule(self):
+        if self.trigger == "weekly" and not self.weekdays:
+            raise ValueError("Choose at least one weekday.")
+        if self.trigger == "cron":
+            parse_cron(self.cron)
+        return self
 
     @field_validator("timezone")
     @classmethod
@@ -38,6 +53,13 @@ class Policy(Input):
         except (ZoneInfoNotFoundError, ValueError):
             raise ValueError("Choose an IANA time zone, such as Asia/Jakarta.") from None
         return value
+
+
+class Policy(Schedule):
+    name: str = Field(min_length=1, max_length=80)
+    source_id: str
+    destination: str = Field(default="local", pattern=r"^[a-zA-Z0-9][a-zA-Z0-9_-]{0,63}$")
+    enabled: bool = True
 
 
 class Settings(Input):

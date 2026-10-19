@@ -12,7 +12,8 @@ from starlette.middleware.trustedhost import TrustedHostMiddleware
 
 from . import __version__
 from .db import now
-from .models import Policy, RestoreConfirm, RestorePreview, Settings, Source
+from .models import Policy, RestoreConfirm, RestorePreview, Schedule, Settings, Source
+from .schedules import upcoming
 from .service import Service
 
 
@@ -64,7 +65,7 @@ def create_app(directory=None, adapter=None, worker=True):
     @app.exception_handler(RequestValidationError)
     async def validation(request, error):
         # Do not echo submitted fields (a user may accidentally submit a secret).
-        messages = [f"{'.'.join(str(v) for v in e['loc'][1:])}: {e['msg']}" for e in error.errors()]
+        messages = [f"{'.'.join(str(v) for v in e['loc'][1:]) or 'Request'}: {e['msg']}" for e in error.errors()]
         return JSONResponse({"detail": "; ".join(messages)}, status_code=422)
 
     @app.get("/api/state")
@@ -87,6 +88,11 @@ def create_app(directory=None, adapter=None, worker=True):
     @app.post("/api/sources/{key}/preflight")
     def preflight(key: str):
         return service.preflight(key)
+
+    @app.post("/api/schedules/preview")
+    def schedule_preview(body: Schedule):
+        return {"timezone": body.timezone, "occurrences": upcoming(body.model_dump()),
+                "horizon_years": 8}
 
     @app.post("/api/policies", status_code=201)
     def add_policy(body: Policy):

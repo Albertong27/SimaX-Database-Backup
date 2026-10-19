@@ -10,6 +10,7 @@ from zoneinfo import ZoneInfo
 from .adapters import NativeAdapter
 from .db import Store, identifier, now
 from .models import Settings
+from .schedules import latest_due
 
 
 def digest(path):
@@ -100,23 +101,29 @@ class Service:
         source = self.store.get("sources", body["source_id"])
         if source["role"] != "source" or source["engine"] not in self.adapter.tools:
             raise ValueError("Choose a PostgreSQL or MySQL source connection.")
-        previous = self.store.get("policies", key) if key else {}
-        result = {**body, "id": key or identifier("pol"),
-                  "revision": previous.get("revision", 0) + 1,
-                  "created": previous.get("created", now()), "updated": now(),
-                  "format": "single-sql", "scope": "whole-database"}
         with self.store.connect() as db:
+            db.execute("BEGIN IMMEDIATE")
+            row = db.execute("SELECT body FROM policies WHERE id=?", (key,)).fetchone() if key else None
+            if key and row is None:
+                raise LookupError("Policy not found")
+            previous = json.loads(row[0]) if row else {}
+            result = {**body, "id": key or identifier("pol"),
+                      "revision": previous.get("revision", 0) + 1,
+                      "created": previous.get("created", now()), "updated": now(),
+                      "format": "single-sql", "scope": "whole-database"}
             self.store.put("policies", result, db)
             self.store.audit("Policy saved", result["name"] + f" r{result['revision']}", db=db)
         return result
 
-    def enqueue(self, policy_id, origin="Manual", occurrence=None):
+    def enqueue(self, policy_id, origin="Manual", occurrence=None, expected_revision=None, scheduled_for=None):
         with self.store.connect() as db:
             db.execute("BEGIN IMMEDIATE")
             row = db.execute("SELECT body FROM policies WHERE id=?", (policy_id,)).fetchone()
             if not row:
                 raise LookupError("Policy not found")
             policy = json.loads(row[0])
+            if expected_revision is not None and policy["revision"] != expected_revision:
+                return None
             source = json.loads(db.execute("SELECT body FROM sources WHERE id=?", (policy["source_id"],)).fetchone()[0])
             if not policy["enabled"]:
                 raise ValueError("Enable this policy before starting a backup.")
@@ -137,6 +144,8 @@ class Service:
             run = {"id": identifier("run"), "kind": "backup", "status": "queued",
                    "stage": "Queued", "created": now(), "origin": origin,
                    "policy": policy, "source": source, "events": [], "error": None}
+            if scheduled_for:
+                run["scheduled_for"] = scheduled_for
             self.store.put("runs", run, db)
             self.store.audit("Backup queued", run["id"], db=db)
         return run
@@ -144,18 +153,15 @@ class Service:
     def schedule(self, instant=None):
         instant = instant or datetime.now(timezone.utc)
         for policy in self.store.all("policies"):
-            if not policy["enabled"] or policy["trigger"] != "daily":
+            if not policy["enabled"] or policy["trigger"] == "manual":
                 continue
-            zone = ZoneInfo(policy["timezone"])
-            local = instant.astimezone(zone)
-            hour, minute = map(int, policy["time"].split(":"))
-            due = local.replace(hour=hour, minute=minute, second=0, microsecond=0, fold=0)
-            # Nonexistent DST wall times are skipped; a repeated time runs once, at fold 0.
-            roundtrip = due.astimezone(timezone.utc).astimezone(zone)
-            if roundtrip.replace(tzinfo=None) != due.replace(tzinfo=None):
-                continue
-            if due.astimezone(timezone.utc) <= instant and due >= datetime.fromisoformat(policy["updated"]):
-                self.enqueue(policy["id"], "Schedule", f"{policy['id']}:{local.date()}")
+            due = latest_due(policy, instant)
+            if due and due >= datetime.fromisoformat(policy["updated"]):
+                # Preserve legacy daily identities when upgrading an existing catalog.
+                identity = (str(due.astimezone(ZoneInfo(policy["timezone"])).date())
+                            if policy["trigger"] in {"daily", "weekly"} else due.isoformat())
+                self.enqueue(policy["id"], "Schedule", f"{policy['id']}:{identity}",
+                             expected_revision=policy["revision"], scheduled_for=due.isoformat())
 
     def stage(self, run, stage):
         run["stage"] = stage
