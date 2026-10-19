@@ -20,7 +20,7 @@ class Store:
         self.path = directory / "simax.sqlite3"
         with self.connect() as db:
             version = db.execute("PRAGMA user_version").fetchone()[0]
-            if version not in {0, 1}:
+            if version not in {0, 1, 2}:
                 raise ValueError("This catalog belongs to a newer schema version. Use a compatible SimaX release.")
             db.executescript("""
                 PRAGMA journal_mode=WAL;
@@ -41,7 +41,12 @@ class Store:
                     id TEXT PRIMARY KEY, created TEXT NOT NULL);
                 CREATE TABLE IF NOT EXISTS confirmations (
                     id TEXT PRIMARY KEY, body TEXT NOT NULL);
-                PRAGMA user_version=1;
+                CREATE TABLE IF NOT EXISTS trigger_state (
+                    id TEXT PRIMARY KEY, body TEXT NOT NULL);
+                CREATE TABLE IF NOT EXISTS trigger_receipts (
+                    id TEXT PRIMARY KEY, received REAL NOT NULL);
+                CREATE INDEX IF NOT EXISTS trigger_receipts_received ON trigger_receipts(received);
+                PRAGMA user_version=2;
             """)
 
     @contextmanager
@@ -57,7 +62,7 @@ class Store:
 
     @staticmethod
     def table(table):
-        if table not in {"sources", "policies", "runs", "artifacts", "audit", "settings", "confirmations"}:
+        if table not in {"sources", "policies", "runs", "artifacts", "audit", "settings", "confirmations", "trigger_state"}:
             raise ValueError("Unknown collection")
         return table
 

@@ -10,3 +10,6 @@
 @media(prefers-reduced-motion:no-preference){.panel,.button,nav a{transition:background .15s,border-color .15s}.dialog-content{animation:appear .15s ease-out}@keyframes appear{from{opacity:0;transform:translateY(5px)}to{opacity:1;transform:none}}}
 
 .weekdays{border:1px solid var(--line);border-radius:7px;padding:14px;display:flex;flex-wrap:wrap;gap:16px}.weekdays legend{font-size:12px;font-weight:600;padding:0 6px}.weekdays label{display:flex;align-items:center;gap:7px;font-size:13px}.schedule-preview{display:grid;gap:14px;margin-top:18px;font-size:13px}.schedule-preview ol{padding-left:24px;line-height:1.9;font-family:JetBrains,monospace;font-size:12px;overflow-wrap:anywhere}
+
+textarea{width:100%;padding:10px 11px;border:1px solid var(--line);border-radius:6px;background:var(--panel);color:var(--ink);font:13px JetBrains,monospace;resize:vertical}.notice small{display:block;margin-top:6px}
+.trigger-evidence{margin-top:6px;display:grid;justify-items:start;gap:4px}

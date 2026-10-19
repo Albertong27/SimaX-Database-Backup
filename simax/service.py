@@ -3,6 +3,7 @@ import json
 import os
 import sqlite3
 import threading
+from contextlib import nullcontext
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from zoneinfo import ZoneInfo
@@ -11,6 +12,7 @@ from .adapters import NativeAdapter
 from .db import Store, identifier, now
 from .models import Settings
 from .schedules import latest_due
+from .events import EventManager
 
 
 def digest(path):
@@ -29,6 +31,7 @@ class Service:
         self.thread = None
         self.runtime_error = None
         self.lock = None
+        self.events = EventManager(self)
         try:
             self.store.get("settings", "general")
         except LookupError:
@@ -56,13 +59,15 @@ class Service:
                 self.store.audit("Run interrupted", run["id"], "Interrupted")
         self.thread = threading.Thread(target=self.loop, name="simax-worker", daemon=True)
         self.thread.start()
+        self.events.start()
 
     def close(self):
         self.stop.set()
+        self.events.close()
         if self.thread:
             self.thread.join(timeout=5)
         # Keep the lock if a native operation is still finishing; process exit releases it.
-        if self.lock and not (self.thread and self.thread.is_alive()):
+        if self.lock and not (self.thread and self.thread.is_alive()) and not (self.events.thread and self.events.thread.is_alive()):
             self.lock.close()
 
     def save_source(self, body, key=None):
@@ -115,9 +120,11 @@ class Service:
             self.store.audit("Policy saved", result["name"] + f" r{result['revision']}", db=db)
         return result
 
-    def enqueue(self, policy_id, origin="Manual", occurrence=None, expected_revision=None, scheduled_for=None):
-        with self.store.connect() as db:
-            db.execute("BEGIN IMMEDIATE")
+    def enqueue(self, policy_id, origin="Manual", occurrence=None, expected_revision=None, scheduled_for=None, db=None, trigger_event=None):
+        owns_transaction = db is None
+        with (self.store.connect() if owns_transaction else nullcontext(db)) as db:
+            if owns_transaction:
+                db.execute("BEGIN IMMEDIATE")
             row = db.execute("SELECT body FROM policies WHERE id=?", (policy_id,)).fetchone()
             if not row:
                 raise LookupError("Policy not found")
@@ -146,6 +153,8 @@ class Service:
                    "policy": policy, "source": source, "events": [], "error": None}
             if scheduled_for:
                 run["scheduled_for"] = scheduled_for
+            if trigger_event:
+                run["trigger_event"] = trigger_event
             self.store.put("runs", run, db)
             self.store.audit("Backup queued", run["id"], db=db)
         return run
@@ -153,7 +162,7 @@ class Service:
     def schedule(self, instant=None):
         instant = instant or datetime.now(timezone.utc)
         for policy in self.store.all("policies"):
-            if not policy["enabled"] or policy["trigger"] == "manual":
+            if not policy["enabled"] or policy["trigger"] not in {"daily", "weekly", "cron"}:
                 continue
             due = latest_due(policy, instant)
             if due and due >= datetime.fromisoformat(policy["updated"]):
@@ -309,6 +318,7 @@ class Service:
 
     def tick(self):
         self.schedule()
+        self.events.dispatch()
         with self.store.connect() as db:
             db.execute("BEGIN IMMEDIATE")
             row = db.execute("SELECT body FROM runs WHERE status='queued' ORDER BY rowid LIMIT 1").fetchone()

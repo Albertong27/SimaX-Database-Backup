@@ -11,6 +11,7 @@ SimaX Database Backup is maintained under Simply Smart X (SimaX). A local web ap
 - Native database validation is on `feat/live-database-roundtrips`, based on `feat/web-foundation` until the preceding milestones are reviewed.
 - Private-network connection settings and `.env` startup support are on `feat/private-network-connections`, based on `feat/live-database-roundtrips`.
 - Flexible schedules are on `feat/flexible-schedules`, based on `feat/private-network-connections`.
+- Event triggers are on `feat/event-triggers`, based on `feat/flexible-schedules`.
 - Use focused commits with prefixes such as `docs:`, `feat:`, `fix:`, and `chore:`.
 - Submit a pull request explaining the problem, resulting behavior, and relevant validation.
 - Keep changes reviewable; squash merge approved PRs and delete merged branches.

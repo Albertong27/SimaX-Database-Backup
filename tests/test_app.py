@@ -162,7 +162,7 @@ def test_unsupported_policy_cannot_be_accepted(setup):
     src = client.post("/api/sources", json=source(engine="oracle")).json()
     assert client.post("/api/policies", json={"name": "oracle", "source_id": src["id"]}).status_code == 400
     src = client.post("/api/sources", json=source("second")).json()
-    assert client.post("/api/policies", json={"name": "bad", "source_id": src["id"], "trigger": "webhook"}).status_code == 422
+    assert client.post("/api/policies", json={"name": "bad", "source_id": src["id"], "trigger": "redis"}).status_code == 422
     assert client.post("/api/policies", json={"name": "bad", "source_id": src["id"], "destination": "../outside"}).status_code == 422
     assert client.post("/api/policies", json={"name": "bad", "source_id": src["id"], "timezone": "invalid"}).status_code == 422
 

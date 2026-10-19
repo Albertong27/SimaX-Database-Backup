@@ -56,10 +56,53 @@ class Schedule(Input):
 
 
 class Policy(Schedule):
+    trigger: Literal["manual", "daily", "weekly", "cron", "table-change", "database-change", "webhook", "mqtt"] = "manual"
     name: str = Field(min_length=1, max_length=80)
     source_id: str
     destination: str = Field(default="local", pattern=r"^[a-zA-Z0-9][a-zA-Z0-9_-]{0,63}$")
     enabled: bool = True
+    poll_seconds: int = Field(default=300, ge=60, le=86400)
+    change_tables: list[str] = Field(default_factory=list, max_length=100)
+    acknowledge_scan: bool = False
+    debounce_seconds: int = Field(default=10, ge=0, le=300)
+    cooldown_seconds: int = Field(default=300, ge=60, le=86400)
+    event_secret_env: str = Field(default="SIMAX_SECRET_EVENTS", pattern=r"^SIMAX_SECRET_[A-Z0-9_]{1,80}$")
+    mqtt_host: str = Field(default="localhost", pattern=r"^[a-zA-Z0-9][a-zA-Z0-9.:-]{0,252}$")
+    mqtt_port: int = Field(default=8883, ge=1, le=65535)
+    mqtt_topic: str = Field(default="simax/backup", min_length=1, max_length=200)
+    mqtt_tls: bool = True
+    mqtt_username: str = Field(default="", max_length=128)
+    mqtt_password_env: str = Field(default="", pattern=r"^(?:SIMAX_SECRET_[A-Z0-9_]{1,80})?$")
+
+    @field_validator("mqtt_topic")
+    @classmethod
+    def exact_topic(cls, value):
+        if any(c in "+#" or ord(c) < 32 for c in value):
+            raise ValueError("Use one exact MQTT topic without wildcards or control characters.")
+        return value
+
+    @model_validator(mode="after")
+    def valid_event_trigger(self):
+        if self.trigger in {"table-change", "database-change"} and not self.acknowledge_scan:
+            raise ValueError("Acknowledge the read-only full-table scans and polling gaps before enabling change observation.")
+        if self.trigger == "table-change" and not self.change_tables:
+            raise ValueError("Choose at least one table to watch.")
+        if any(not name or len(name) > 260 or any(ord(c) < 32 for c in name) for name in self.change_tables):
+            raise ValueError("Use table names from the source preflight inventory, one per line.")
+        if len(set(self.change_tables)) != len(self.change_tables):
+            raise ValueError("Table selection contains duplicates.")
+        if self.trigger == "mqtt" and bool(self.mqtt_username) != bool(self.mqtt_password_env):
+            raise ValueError("Set both MQTT username and password environment reference, or leave both empty.")
+        return self
+
+
+class TriggerEvent(Input):
+    event_id: str = Field(pattern=r"^[a-zA-Z0-9][a-zA-Z0-9_.:-]{0,127}$")
+
+
+class MqttEvent(TriggerEvent):
+    timestamp: int = Field(strict=True)
+    signature: str = Field(pattern=r"^[a-f0-9]{64}$")
 
 
 class Settings(Input):

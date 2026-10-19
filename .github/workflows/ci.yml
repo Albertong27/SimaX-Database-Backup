@@ -41,7 +41,7 @@ jobs:
         run: |
           .venv/bin/python -m compileall -q simax
           node --check simax/static/app.js
-      - name: Run API, persistence and recovery tests
+      - name: Run API, event delivery, scheduling and recovery tests
         run: .venv/bin/python -m pytest -q
       - name: Build distributable wheel
         run: .venv/bin/python -m pip wheel . --no-deps --wheel-dir build/wheels

@@ -9,11 +9,14 @@ from fastapi.exceptions import RequestValidationError
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from starlette.middleware.trustedhost import TrustedHostMiddleware
+from starlette.concurrency import run_in_threadpool
 
 from . import __version__
 from .db import now
 from .models import Policy, RestoreConfirm, RestorePreview, Schedule, Settings, Source
 from .schedules import upcoming
+from .events import EventRejected, IntakeUnavailable, verify_signature
+from .models import TriggerEvent
 from .service import Service
 
 
@@ -74,7 +77,7 @@ def create_app(directory=None, adapter=None, worker=True):
                 "runtime": "degraded" if service.runtime_error else "running" if service.thread and service.thread.is_alive() else "stopped",
                 "runtime_error": service.runtime_error, "tools": service.adapter.availability(),
                 "data_directory": str(service.directory),
-                **{key: service.store.all(key) for key in ["sources", "policies", "runs", "artifacts", "audit"]},
+                **{key: service.store.all(key) for key in ["sources", "policies", "runs", "artifacts", "audit", "trigger_state"]},
                 "settings": service.store.get("settings", "general")}
 
     @app.post("/api/sources", status_code=201)
@@ -93,6 +96,36 @@ def create_app(directory=None, adapter=None, worker=True):
     def schedule_preview(body: Schedule):
         return {"timezone": body.timezone, "occurrences": upcoming(body.model_dump()),
                 "horizon_years": 8}
+
+    @app.post("/api/triggers/webhook/{key}")
+    async def webhook(key: str, request: Request):
+        policy = await run_in_threadpool(service.store.get, "policies", key)
+        if policy["trigger"] != "webhook":
+            return JSONResponse({"detail": "Webhook policy not found."}, status_code=404)
+        payload = bytearray()
+        async for chunk in request.stream():
+            if len(payload) + len(chunk) > 4096:
+                return JSONResponse({"detail": "Event body exceeds 4096 bytes."}, status_code=413)
+            payload.extend(chunk)
+        try:
+            timestamp_text = request.headers.get("x-simax-timestamp", "")
+            if not timestamp_text.isascii() or not timestamp_text.isdigit() or len(timestamp_text) > 12:
+                raise EventRejected("Invalid event timestamp.")
+            signature = request.headers.get("x-simax-signature", "")
+            verify_signature(policy, int(timestamp_text), signature, bytes(payload))
+        except (ValueError, TypeError):
+            return JSONResponse({"detail": "Event authentication failed. Check signature, timestamp and configured secret."}, status_code=401)
+        try:
+            event = TriggerEvent.model_validate_json(payload)
+        except ValueError:
+            return JSONResponse({"detail": "Expected only an event_id (1–128 letters, digits, dot, underscore, colon or hyphen)."}, status_code=422)
+        try:
+            result = await run_in_threadpool(service.events.receive, policy, event.event_id, "webhook")
+        except EventRejected as error:
+            return JSONResponse({"detail": str(error)}, status_code=409)
+        except IntakeUnavailable:
+            return JSONResponse({"detail": "Event intake is full. Retry later with the same event ID."}, status_code=503)
+        return JSONResponse(result, status_code=409 if result["status"] == "duplicate" else 202)
 
     @app.post("/api/policies", status_code=201)
     def add_policy(body: Policy):

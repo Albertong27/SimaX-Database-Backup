@@ -6,12 +6,12 @@ Validated locally on 2026-10-19, Windows x64, Python 3.12.4. All data is synthet
 
 | Engine | Server | Export / replay clients | Native live result |
 | --- | --- | --- | --- |
-| PostgreSQL | 17.11, Windows x64 EDB binaries | pg_dump / psql 17.11 | 4 passed; 1 MySQL-only case skipped |
-| MySQL Community | 8.4.11, Windows x64 | mysqldump / mysql 8.4.11 | 5 passed |
+| PostgreSQL | 17.11, Windows x64 EDB binaries | pg_dump / psql 17.11 | 5 passed; 1 MySQL-only case skipped |
+| MySQL Community | 8.4.11, Windows x64 | mysqldump / mysql 8.4.11 | 6 passed |
 
 Each engine uses two separate server processes with different loopback ports and data directories. Both databases are named `simax_fixture`. No existing server, Windows service, normal SimaX catalog, or user database is used. The app uses its real SQLite store, HTTP API, background worker, and native adapter throughout the round trip.
 
-The default regression suite has 27 passing tests. Live cases are skipped by default. GitHub Actions is configured to repeat both engines on `windows-2025` with Python 3.12 and the same pinned binaries; a hosted run has not occurred because this repository has no remote yet.
+The default regression suite has 81 passing tests. Live cases are skipped by default. GitHub Actions is configured to repeat both engines on `windows-2025` with Python 3.12 and the same pinned binaries; this milestone has not been pushed or validated by hosted CI.
 
 ## Reproduce on Windows
 
@@ -44,6 +44,8 @@ The successful round trip performs these operations:
 8. Confirm that target mutations did not change the source, and that a second restore into the nonempty target is rejected.
 
 Additional live cases reject corrupted artifacts and invalid credentials without registering recovery points or exposing passwords; reject MyISAM tables; insert a sentinel after preview and confirm replay is blocked at execution; and deliberately fail SQL replay to verify stop-on-error. PostgreSQL rolls back the failed replay; MySQL retains preceding DDL and stops before later statements, consistent with its documented partial-restore boundary.
+
+The event milestone additionally verifies read-only table/database fingerprints, ignored out-of-scope table changes, fractional decimal updates, inserts/deletes, column changes, table removal, and real backups requested by observed changes. Temporary fixture tables are removed before owned test servers stop. Reports for this milestone are in the ignored `build/live-2eddd9c52651/` workspace.
 
 ## Defect fixed
 

@@ -13,18 +13,25 @@ The interface follows the supplied PDF and HTML: Schibsted Grotesk text, JetBrai
 | `simax/adapters.py` | Native PostgreSQL/MySQL inspection, export and replay |
 | `simax/schedules.py` | Shared schedule calculation, bounded cron parsing and previews |
 | `simax/service.py` | Scheduling, queue execution, policy snapshots, finalization and authorization |
+| `simax/events.py`, `simax/mqtt.py`, `simax/observation.py` | Durable intake, independent observers, broker lifecycle and read-only table fingerprints |
 | `simax/app.py` | Local HTTP boundary, API routes and static assets |
 | `simax/static/` | Forms, navigation, tables, filters and visual styles |
 
 ## Persistence and execution
 
-`data/simax.sqlite3` uses WAL and foreign-key enforcement. Schema version 1 includes sources, policies, runs, artifacts, audit, settings, schedule occurrences, and restore confirmations. JSON documents have relational keys for policy/source relationships and uniqueness. Passwords are stored only as environment-variable references.
+`data/simax.sqlite3` uses WAL and foreign-key enforcement. Schema version 2 retains sources, policies, runs, artifacts, audit, settings, schedule occurrences, and restore confirmations, and adds trigger state plus timestamped event receipts. JSON documents have relational keys for policy/source relationships and uniqueness. Passwords are stored only as environment-variable references.
 
 One runtime owns the catalog using an OS file lock; one worker serializes backup and restore jobs. Accepted jobs are persisted before acknowledgment. Restart marks previously running work interrupted and resumes queued work. Allow active native operations to finish before stopping the server. A hard stop can leave partial files or partial restore effects; inspect them before retrying.
 
 Daily, weekly and numeric five-field cron schedules share the same IANA wall-clock calculator for previews and execution. Repeated DST times run once at the first occurrence; nonexistent times are skipped. Only the latest due occurrence from the current local day can catch up after downtime. An edit's timestamp excludes earlier occurrences. Enqueue rechecks the policy revision within the SQLite transaction to reject a stale scheduler snapshot.
 
 Occurrence keys persist across restarts. Daily/weekly policies use policy/day keys, preserving existing daily records; cron policies use policy/UTC-instant keys. An occurrence during an active backup for the source coalesces into that job and is audited. Scheduled jobs record their intended UTC time. Pausing prevents new enqueues; accepted jobs remain queued unless cancelled. The preview endpoint is read-only and searches up to eight years for up to five future occurrences. See [scheduling rules](scheduling.md).
+
+## Event observation and intake
+
+An event supervisor reconciles MQTT subscriptions and submits at most two independent table scans, leaving backup execution separate. Scans compare row and column fingerprints; they cannot recover transient changes or provide a database-wide transactional observation snapshot. Webhooks and MQTT require policy-bound HMAC signatures and recent timestamps. Event identities are retained for seven days; intake and pending state commit atomically. A pending follow-up survives an active source backup and waits for its policy cooldown. Dispatch commits the run and consumes pending state in one transaction. Policy edits invalidate earlier pending revisions.
+
+MQTT uses QoS 1 with acknowledgments after persistence, clean sessions and reconnect/resubscribe. Invalid/retained messages are discarded. There is no durable offline broker replay guarantee. See [event trigger configuration, scope and failure semantics](event-triggers.md). SQLite v1 catalogs receive additive schema-2 tables; older releases reject the new catalog version.
 
 ## Backup completion
 

@@ -184,3 +184,60 @@ def test_native_replay_stops_on_sql_error(live, tmp_path):
         assert tables == []
     else:
         assert tables == ["before_error"]
+
+
+def test_native_change_observation_and_triggered_backup(live, tmp_path):
+    from simax.models import Policy, Source
+    from simax.observation import fingerprint
+    from simax.service import Service
+
+    _, _, adapter, original, _, _ = live
+    service = Service(tmp_path / "events", adapter)
+    source = service.save_source(Source(**{k: v for k, v in original.items() if k in Source.model_fields}).model_dump())
+    table = "public.simax_change_fixture" if ENGINE == "postgresql" else "simax_change_fixture"
+    other = "public.simax_unwatched_fixture" if ENGINE == "postgresql" else "simax_unwatched_fixture"
+    adapter.query(source, f"CREATE TABLE {table}(id INTEGER PRIMARY KEY, amount DECIMAL(10,2), value VARCHAR(80))")
+    adapter.query(source, f"CREATE TABLE {other}(id INTEGER PRIMARY KEY)")
+    try:
+        policy = service.save_policy(Policy(name="Watch one table", source_id=source["id"], trigger="table-change",
+                                            change_tables=[table], acknowledge_scan=True, debounce_seconds=0, cooldown_seconds=60).model_dump())
+        service.events.observe(policy)
+        baseline = service.store.get("trigger_state", policy["id"])["fingerprint"]
+        adapter.query(source, f"INSERT INTO {other} VALUES(1)")
+        assert fingerprint(adapter, source, [table], service.directory) == baseline
+        adapter.query(source, f"INSERT INTO {table} VALUES(1,12.50,'café 日本')")
+        inserted = fingerprint(adapter, source, [table], service.directory)
+        assert inserted != baseline
+        adapter.query(source, f"UPDATE {table} SET amount=12.51 WHERE id=1")
+        updated = fingerprint(adapter, source, [table], service.directory)
+        assert updated != inserted  # Fractional values must not be rounded by HEX(number).
+        service.events.observe(policy)
+        service.events.dispatch()
+        run = service.store.all("runs")[0]
+        assert run["origin"] == "table-change"
+        service.execute(run)
+        assert service.store.get("runs", run["id"])["status"] == "succeeded"
+        assert service.store.all("artifacts")[0]["bytes"] > 0
+        adapter.query(source, f"DELETE FROM {table} WHERE id=1")
+        assert fingerprint(adapter, source, [table], service.directory) == baseline
+        adapter.query(source, f"ALTER TABLE {table} ADD COLUMN added INTEGER")
+        assert fingerprint(adapter, source, [table], service.directory) != baseline
+        database_before = fingerprint(adapter, source, [], service.directory)
+        adapter.query(source, f"DROP TABLE {other}")
+        assert fingerprint(adapter, source, [], service.directory) != database_before
+        db_policy = service.save_policy(Policy(name="Watch database", source_id=source["id"], trigger="database-change",
+                                               acknowledge_scan=True, debounce_seconds=0, cooldown_seconds=60).model_dump())
+        service.events.observe(db_policy)
+        adapter.query(source, f"INSERT INTO {table}(id,amount,value) VALUES(2,1.25,'database event')")
+        service.events.observe(db_policy)
+        service.events.dispatch()
+        run = service.store.all("runs")[0]
+        assert run["origin"] == "database-change"
+        service.execute(run)
+        assert service.store.get("runs", run["id"])["status"] == "succeeded"
+        adapter.query(source, f"TRUNCATE TABLE {table}")
+        assert fingerprint(adapter, source, [table], service.directory) != updated
+        print("Verified table/database polling, out-of-scope changes, fractional updates, column/table changes and real event-triggered exports.")
+    finally:
+        adapter.query(source, f"DROP TABLE IF EXISTS {other}")
+        adapter.query(source, f"DROP TABLE IF EXISTS {table}")
