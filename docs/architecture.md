@@ -54,7 +54,8 @@ A valid checksum does not make SQL safe. Routines and triggers may execute code 
 - SQL inspection queries are sent as UTF-8 standard input, avoiding Windows argument code-page conversion. PostgreSQL client encoding is explicit; MySQL batch output is raw UTF-8.
 - Only `SIMAX_SECRET_*` credential references are allowed. Inherited database-client overrides are removed; saved identity determines each command.
 - Native tools receive passwords through their environment. The same OS user or an administrator may inspect that environment; a protected credential broker is future work.
-- TLS identity verification is default. Native stderr is not persisted because it can expose SQL, data or credentials.
+- TLS identity verification is default. Operators may explicitly disable database TLS for a connection, including private-network remote servers; there is no automatic fallback or Tailscale detection. Native stderr is not persisted because it can expose SQL, data or credentials.
+- The CLI loads the working directory's `.env` before constructing the app, or an explicit `--env-file`. Existing process variables win; variable interpolation is disabled. Parent directories are not searched, and the file is never served by the web app.
 - OS permissions and protected volumes are required for plaintext backups and private metadata.
 - Audit history is not tamper-evident compliance evidence.
 

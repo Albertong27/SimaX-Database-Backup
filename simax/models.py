@@ -1,7 +1,7 @@
 from typing import Literal
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 
 class Input(BaseModel):
@@ -19,12 +19,6 @@ class Source(Input):
     environment: Literal["PROD", "STAGING", "DEV", "DISPOSABLE"] = "DEV"
     role: Literal["source", "target"] = "source"
     tls: Literal["verify-full", "disable"] = "verify-full"
-
-    @model_validator(mode="after")
-    def local_plaintext_only(self):
-        if self.tls == "disable" and self.host not in {"localhost", "127.0.0.1"}:
-            raise ValueError("Unencrypted connections are allowed only on loopback.")
-        return self
 
 
 class Policy(Input):

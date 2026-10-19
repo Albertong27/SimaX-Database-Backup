@@ -9,6 +9,7 @@ SimaX Database Backup is maintained under Simply Smart X (SimaX). A local web ap
 - The initial PRD is prepared on `docs/initial-prd`.
 - The initial application is on `feat/web-foundation`, based on `docs/initial-prd` until both changes are reviewed into `main`.
 - Native database validation is on `feat/live-database-roundtrips`, based on `feat/web-foundation` until the preceding milestones are reviewed.
+- Private-network connection settings and `.env` startup support are on `feat/private-network-connections`, based on `feat/live-database-roundtrips`.
 - Use focused commits with prefixes such as `docs:`, `feat:`, `fix:`, and `chore:`.
 - Submit a pull request explaining the problem, resulting behavior, and relevant validation.
 - Keep changes reviewable; squash merge approved PRs and delete merged branches.

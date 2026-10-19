@@ -1,6 +1,6 @@
 # Development status — 0.1.0 preview
 
-Date: 2026-10-19. Branch: `feat/live-database-roundtrips`, based on `feat/web-foundation`. The PRD remains the target product definition; this milestone does not claim its whole scope is complete.
+Date: 2026-10-19. Current branch: `feat/private-network-connections`, based on `feat/live-database-roundtrips`. The PRD remains the target product definition; this milestone does not claim its whole scope is complete.
 
 | Area | Delivered | Remaining |
 | --- | --- | --- |
@@ -17,7 +17,7 @@ Date: 2026-10-19. Branch: `feat/live-database-roundtrips`, based on `feat/web-fo
 
 ## Validation
 
-- Local result: 27 automated tests passed; wheel packaging, Python compilation, JavaScript syntax and documentation checks passed.
+- Local result: 32 automated tests passed after adding explicit remote non-TLS connections and automatic `.env` loading. The five live-test cases are opt-in and skipped by the default suite. Python compilation, JavaScript syntax and documentation checks passed.
 - Browser smoke result: connection creation/persistence, missing-tool preflight, policy creation/run failure, desktop and 390px layouts passed; no browser console errors were observed.
 - API/service tests use real SQLite and a controlled adapter. Coverage includes persistence, policy snapshots, duplicate prevention, partial export exclusion, DST schedules, cancellation, corruption, authorization/replay, target rechecks, path containment, and single runtime ownership.
 - Native argument tests ensure passwords stay out of command arguments and inherited client overrides are removed.

@@ -94,11 +94,24 @@ def test_source_duplicate_and_no_password_leak(setup):
 @pytest.mark.parametrize("changes", [
     {"database": "postgresql://other/server"}, {"database": "x; DROP TABLE x"},
     {"host": "--help"}, {"password_env": "PATH"},
-    {"host": "remote.example", "tls": "disable"}, {"port": 0}
+    {"tls": "prefer"}, {"port": 0}
 ])
 def test_connection_input_boundaries(setup, changes):
     client, _, _ = setup
     assert client.post("/api/sources", json=source(**changes)).status_code == 422
+
+
+@pytest.mark.parametrize("engine", ["postgresql", "mysql"])
+def test_explicit_private_network_plaintext_and_tls_default(setup, engine):
+    client, _, _ = setup
+    body = source(engine=engine, host="100.64.0.10")
+    body.pop("tls")
+    saved = client.post("/api/sources", json=body)
+    assert saved.status_code == 201
+    assert saved.json()["tls"] == "verify-full"
+    edited = client.put(f"/api/sources/{saved.json()['id']}", json={**body, "tls": "disable"})
+    assert edited.status_code == 200
+    assert edited.json()["tls"] == "disable"
 
 
 def test_origin_host_and_mutation_boundaries(setup):
