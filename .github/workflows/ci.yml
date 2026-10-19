@@ -62,6 +62,8 @@ jobs:
         run: |
           python -m pip install -r requirements-dev.txt
           python scripts/fetch_test_tools.py
+      - name: Verify Windows DPAPI, migration and credential redaction
+        run: python -m pytest tests/test_vault.py tests/test_startup.py -q
       - name: Run native backup and restore tests without Docker
         run: |
           $env:PATH = "$pwd\build\native-tools\postgresql\pgsql\bin;$pwd\build\native-tools\mysql\mysql-8.4.11-winx64\bin;$env:PATH"

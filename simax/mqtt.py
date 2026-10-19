@@ -17,16 +17,16 @@ class MqttManager:
         self.restart = set()
 
     def build(self, policy):
-        if len(os.environ.get(policy["event_secret_env"], "").encode()) < 32:
+        if len(policy.get("event_secret", "").encode()) < 32:
             raise EventRejected("Set an event secret of at least 32 bytes.")
         client = mqtt.Client(mqtt.CallbackAPIVersion.VERSION2, client_id="simax-" + policy["id"],
                              clean_session=True, protocol=mqtt.MQTTv311, manual_ack=True)
         client.connect_timeout = 10
         client.reconnect_delay_set(min_delay=1, max_delay=60)
         if policy["mqtt_username"]:
-            password = os.environ.get(policy["mqtt_password_env"])
+            password = policy.get("mqtt_password")
             if password is None:
-                raise EventRejected("MQTT password environment variable is missing.")
+                raise EventRejected("Save a broker password in the policy settings.")
             client.username_pw_set(policy["mqtt_username"], password)
         if policy["mqtt_tls"]:
             client.tls_set(ca_certs=os.environ.get("SIMAX_MQTT_CA_CERT") or None)

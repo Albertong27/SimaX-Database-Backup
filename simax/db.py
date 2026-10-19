@@ -5,6 +5,8 @@ from datetime import datetime, timezone
 from pathlib import Path
 from uuid import uuid4
 
+from .vault import Vault, import_legacy
+
 
 def now():
     return datetime.now(timezone.utc).isoformat(timespec="seconds")
@@ -15,12 +17,12 @@ def identifier(prefix):
 
 
 class Store:
-    def __init__(self, directory: Path):
-        directory.mkdir(parents=True, exist_ok=True)
+    def __init__(self, directory: Path, legacy_secrets=None):
+        directory.mkdir(parents=True, exist_ok=True, mode=0o700)
         self.path = directory / "simax.sqlite3"
         with self.connect() as db:
             version = db.execute("PRAGMA user_version").fetchone()[0]
-            if version not in {0, 1, 2}:
+            if version not in {0, 1, 2, 3}:
                 raise ValueError("This catalog belongs to a newer schema version. Use a compatible SimaX release.")
             db.executescript("""
                 PRAGMA journal_mode=WAL;
@@ -46,8 +48,26 @@ class Store:
                 CREATE TABLE IF NOT EXISTS trigger_receipts (
                     id TEXT PRIMARY KEY, received REAL NOT NULL);
                 CREATE INDEX IF NOT EXISTS trigger_receipts_received ON trigger_receipts(received);
-                PRAGMA user_version=2;
             """)
+            db.execute("BEGIN IMMEDIATE")
+            version = db.execute("PRAGMA user_version").fetchone()[0]
+            self.vault = Vault(directory, existing=version == 3)
+            self.encode, self.decode = self.vault.encode, self.vault.decode
+            collections = ("sources", "policies", "runs", "artifacts", "audit", "settings", "confirmations", "trigger_state")
+            for table in collections:
+                for row in db.execute(f"SELECT id,body FROM {table}").fetchall():
+                    if version == 3:
+                        self.decode(row[1])  # Fail closed before the worker starts.
+                    else:
+                        body = import_legacy(json.loads(row[1]), legacy_secrets or {})
+                        db.execute(f"UPDATE {table} SET body=? WHERE id=?", (self.encode(body), row[0]))
+            db.execute("PRAGMA user_version=3")
+        if version != 3:
+            # Rebuild pages and truncate WAL so old plaintext records are not retained.
+            with self.connect() as db:
+                db.execute("PRAGMA wal_checkpoint(TRUNCATE)")
+                db.execute("VACUUM")
+                db.execute("PRAGMA wal_checkpoint(TRUNCATE)")
 
     @contextmanager
     def connect(self):
@@ -68,7 +88,7 @@ class Store:
 
     def all(self, table):
         with self.connect() as db:
-            return [json.loads(row[0]) for row in db.execute(
+            return [self.decode(row[0]) for row in db.execute(
                 f"SELECT body FROM {self.table(table)} ORDER BY rowid DESC"
             )]
 
@@ -77,11 +97,11 @@ class Store:
             row = db.execute(f"SELECT body FROM {self.table(table)} WHERE id=?", (key,)).fetchone()
         if not row:
             raise LookupError("Record not found")
-        return json.loads(row[0])
+        return self.decode(row[0])
 
     def put(self, table, body, db=None):
         table = self.table(table)
-        fields = {"id": body["id"], "body": json.dumps(body)}
+        fields = {"id": body["id"], "body": self.encode(body)}
         if table in {"sources", "policies"}:
             fields["name"] = body["name"]
         if table == "policies":

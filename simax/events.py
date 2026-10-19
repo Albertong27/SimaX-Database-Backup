@@ -2,8 +2,6 @@
 
 import hashlib
 import hmac
-import json
-import os
 import threading
 import time
 from concurrent.futures import ThreadPoolExecutor
@@ -25,9 +23,9 @@ class IntakeUnavailable(Exception):
 
 
 def verify_signature(policy, timestamp, signature, payload, instant=None):
-    secret = os.environ.get(policy["event_secret_env"], "")
+    secret = policy.get("event_secret", "")
     if len(secret.encode()) < 32:
-        raise EventRejected("Set the policy's event secret to at least 32 bytes and restart SimaX.")
+        raise EventRejected("Set the policy's event secret to at least 32 bytes in the policy settings.")
     if abs((instant if instant is not None else time.time()) - timestamp) > 300:
         raise EventRejected("Event timestamp is outside the five-minute acceptance window.")
     message = policy["id"].encode() + b"\n" + str(timestamp).encode() + b"\n" + payload
@@ -45,7 +43,7 @@ class EventManager:
 
     def state(self, policy, db):
         row = db.execute("SELECT body FROM trigger_state WHERE id=?", (policy["id"],)).fetchone()
-        state = json.loads(row[0]) if row else {}
+        state = self.store.decode(row[0]) if row else {}
         if state.get("revision") != policy["revision"]:
             state = {"id": policy["id"], "revision": policy["revision"], "status": "waiting",
                      "message": "Waiting for the first observation or authenticated event.", "pending": None}
@@ -53,7 +51,7 @@ class EventManager:
 
     def current(self, policy, db):
         row = db.execute("SELECT body FROM policies WHERE id=?", (policy["id"],)).fetchone()
-        current = json.loads(row[0]) if row else {}
+        current = self.store.decode(row[0]) if row else {}
         return current.get("enabled") and current.get("revision") == policy["revision"]
 
     def health(self, policy, status, message):
@@ -111,14 +109,14 @@ class EventManager:
                 state = self.state(policy, db)
                 pending = state.get("pending")
                 if policy["trigger"] in CHANGE_TRIGGERS and pending:
-                    source = json.loads(db.execute("SELECT body FROM sources WHERE id=?", (policy["source_id"],)).fetchone()[0])
+                    source = self.store.decode(db.execute("SELECT body FROM sources WHERE id=?", (policy["source_id"],)).fetchone()[0])
                     if source["revision"] != state.get("source_revision"):
                         state.update(pending=None, status="waiting", message="Source changed; a new observation baseline is required.", last_poll=0)
                         self.store.put("trigger_state", state, db)
                         continue
                 if not pending or instant < max(pending["first"] + policy["debounce_seconds"], state.get("last_dispatch", 0) + policy["cooldown_seconds"]):
                     continue
-                active = [json.loads(row[0]) for row in db.execute("SELECT body FROM runs WHERE status IN ('queued','running')")]
+                active = [self.store.decode(row[0]) for row in db.execute("SELECT body FROM runs WHERE status IN ('queued','running')")]
                 if any(r["kind"] == "backup" and r["source"]["id"] == policy["source_id"] for r in active):
                     continue  # Keep a follow-up; the active snapshot may predate this event.
                 run = self.service.enqueue(policy["id"], policy["trigger"], expected_revision=policy["revision"],
@@ -139,7 +137,7 @@ class EventManager:
                 db.execute("BEGIN IMMEDIATE")
                 if not self.current(policy, db):
                     return
-                current_source = json.loads(db.execute("SELECT body FROM sources WHERE id=?", (source["id"],)).fetchone()[0])
+                current_source = self.store.decode(db.execute("SELECT body FROM sources WHERE id=?", (source["id"],)).fetchone()[0])
                 if current_source["revision"] != source["revision"]:
                     return
                 state = self.state(policy, db)
@@ -193,8 +191,8 @@ class EventManager:
                             if len(polls) < 2 and policy["id"] not in polls and time.time() >= state.get("last_poll", 0) + policy["poll_seconds"]:
                                 polls[policy["id"]] = pool.submit(self.observe, policy)
                         elif policy["enabled"] and policy["trigger"] == "webhook":
-                            if len(os.environ.get(policy["event_secret_env"], "").encode()) < 32:
-                                self.health(policy, "degraded", "Set an event secret of at least 32 bytes and restart SimaX.")
+                            if len(policy.get("event_secret", "").encode()) < 32:
+                                self.health(policy, "degraded", "Set an event secret of at least 32 bytes in the policy settings.")
                             else:
                                 with self.store.connect() as db:
                                     state = self.state(policy, db)

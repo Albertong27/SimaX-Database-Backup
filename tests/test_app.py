@@ -43,7 +43,7 @@ class FixtureAdapter:
 
 def source(name="orders-dev", **changes):
     return {"name": name, "engine": "postgresql", "host": "localhost", "port": 5432,
-            "database": "orders", "username": "backup", "password_env": "SIMAX_SECRET_TEST",
+            "database": "orders", "username": "backup", "password": "super-secret",
             "environment": "DEV", "role": "source", "tls": "disable", **changes}
 
 
@@ -78,7 +78,7 @@ def test_empty_catalog_is_real_and_persistent(setup):
     src, _ = make_policy(client)
     other = Service(service.directory, FixtureAdapter())
     assert other.store.get("sources", src["id"])["name"] == "orders-dev"
-    assert "password" not in other.store.get("sources", src["id"])
+    assert other.store.get("sources", src["id"])["password"] == "super-secret"
     assert other.store.all("audit")
 
 
@@ -86,7 +86,7 @@ def test_source_duplicate_and_no_password_leak(setup):
     client, _, _ = setup
     assert client.post("/api/sources", json=source()).status_code == 201
     assert client.post("/api/sources", json=source()).status_code == 409
-    response = client.post("/api/sources", json={**source("extra"), "password": "secret-value"})
+    response = client.post("/api/sources", json={**source("extra"), "unexpected": "secret-value"})
     assert response.status_code == 422
     assert "secret-value" not in response.text
 

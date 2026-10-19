@@ -20,6 +20,22 @@ def digest(path):
         return hashlib.file_digest(stream, "sha256").hexdigest()
 
 
+def acquire_runtime_lock(directory):
+    lock = (directory / "runtime.lock").open("a+b")
+    lock.seek(0)
+    if os.name == "nt":
+        import msvcrt
+        if lock.read(1) == b"":
+            lock.write(b"0")
+            lock.flush()
+        lock.seek(0)
+        msvcrt.locking(lock.fileno(), msvcrt.LK_NBLCK, 1)
+    else:
+        import fcntl
+        fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+    return lock
+
+
 class Service:
     def __init__(self, directory, adapter=None):
         self.directory = Path(directory).resolve()
@@ -39,18 +55,7 @@ class Service:
 
     def start(self):
         # A real OS lock prevents two workers from owning this catalog, including after crashes.
-        self.lock = (self.directory / "runtime.lock").open("a+b")
-        self.lock.seek(0)
-        if os.name == "nt":
-            import msvcrt
-            if self.lock.read(1) == b"":
-                self.lock.write(b"0")
-                self.lock.flush()
-            self.lock.seek(0)
-            msvcrt.locking(self.lock.fileno(), msvcrt.LK_NBLCK, 1)
-        else:
-            import fcntl
-            fcntl.flock(self.lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        self.lock = acquire_runtime_lock(self.directory)
         for run in self.store.all("runs"):
             if run["status"] == "running":
                 run.update(status="interrupted", finished=now(),
@@ -72,6 +77,11 @@ class Service:
 
     def save_source(self, body, key=None):
         previous = self.store.get("sources", key) if key else {}
+        body = dict(body)
+        if body.get("password") is None:
+            body["password"] = previous.get("password")
+        if body["password"] is None:
+            raise ValueError("Enter a database password before saving this connection.")
         if key and any(p["source_id"] == key for p in self.store.all("policies")):
             if body["role"] != "source" or body["engine"] not in self.adapter.tools:
                 raise ValueError("This connection is used by a backup policy. Keep it a supported backup source.")
@@ -94,7 +104,7 @@ class Service:
         # Do not clobber a connection edited while its network check was in flight.
         with self.store.connect() as db:
             db.execute("BEGIN IMMEDIATE")
-            current = json.loads(db.execute("SELECT body FROM sources WHERE id=?", (key,)).fetchone()[0])
+            current = self.store.decode(db.execute("SELECT body FROM sources WHERE id=?", (key,)).fetchone()[0])
             if current["revision"] != source["revision"]:
                 raise ValueError("Connection changed during preflight. Run the check again.")
             current["preflight"] = result
@@ -111,7 +121,17 @@ class Service:
             row = db.execute("SELECT body FROM policies WHERE id=?", (key,)).fetchone() if key else None
             if key and row is None:
                 raise LookupError("Policy not found")
-            previous = json.loads(row[0]) if row else {}
+            previous = self.store.decode(row[0]) if row else {}
+            body = dict(body)
+            for field in ("event_secret", "mqtt_password"):
+                if body.get(field) is None:
+                    body[field] = previous.get(field, "")
+            if body["trigger"] in {"webhook", "mqtt"} and len(body["event_secret"].encode()) < 32:
+                raise ValueError("Enter an event signing secret of at least 32 bytes.")
+            if not body.get("mqtt_username"):
+                body["mqtt_password"] = ""
+            elif not body["mqtt_password"]:
+                raise ValueError("Enter a broker password when using an MQTT username.")
             result = {**body, "id": key or identifier("pol"),
                       "revision": previous.get("revision", 0) + 1,
                       "created": previous.get("created", now()), "updated": now(),
@@ -128,10 +148,10 @@ class Service:
             row = db.execute("SELECT body FROM policies WHERE id=?", (policy_id,)).fetchone()
             if not row:
                 raise LookupError("Policy not found")
-            policy = json.loads(row[0])
+            policy = self.store.decode(row[0])
             if expected_revision is not None and policy["revision"] != expected_revision:
                 return None
-            source = json.loads(db.execute("SELECT body FROM sources WHERE id=?", (policy["source_id"],)).fetchone()[0])
+            source = self.store.decode(db.execute("SELECT body FROM sources WHERE id=?", (policy["source_id"],)).fetchone()[0])
             if not policy["enabled"]:
                 raise ValueError("Enable this policy before starting a backup.")
             if source["role"] != "source" or source["engine"] not in self.adapter.tools:
@@ -142,7 +162,7 @@ class Service:
                 except sqlite3.IntegrityError:
                     return None
             for row in db.execute("SELECT body FROM runs WHERE status IN ('queued','running')"):
-                active = json.loads(row[0])
+                active = self.store.decode(row[0])
                 if active.get("source", {}).get("id") == source["id"] and active["kind"] == "backup":
                     if occurrence:
                         self.store.audit("Schedule coalesced into active backup", active["id"], db=db)
@@ -270,7 +290,7 @@ class Service:
             row = db.execute("SELECT body FROM confirmations WHERE id=?", (token,)).fetchone()
             if not row:
                 raise ValueError("Preview is missing or already used. Run the checks again.")
-            confirmation = json.loads(row[0])
+            confirmation = self.store.decode(row[0])
             if datetime.fromisoformat(confirmation["expires"]) < datetime.now(timezone.utc):
                 raise ValueError("Preview expired. Run the checks again.")
             if not acknowledge_code or target_name != confirmation["target"]["name"]:
@@ -308,7 +328,7 @@ class Service:
             row = db.execute("SELECT body FROM runs WHERE id=?", (key,)).fetchone()
             if not row:
                 raise LookupError("Run not found")
-            run = json.loads(row[0])
+            run = self.store.decode(row[0])
             if run["status"] != "queued":
                 raise ValueError("Only queued runs can be cancelled in this preview.")
             run.update(status="cancelled", finished=now())
@@ -324,7 +344,7 @@ class Service:
             row = db.execute("SELECT body FROM runs WHERE status='queued' ORDER BY rowid LIMIT 1").fetchone()
             if not row:
                 return
-            run = json.loads(row[0])
+            run = self.store.decode(row[0])
             run["status"] = "running"
             self.store.put("runs", run, db)
         self.execute(run)

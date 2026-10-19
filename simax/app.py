@@ -18,6 +18,7 @@ from .schedules import upcoming
 from .events import EventRejected, IntakeUnavailable, verify_signature
 from .models import TriggerEvent
 from .service import Service
+from .vault import public
 
 
 STATIC = Path(__file__).parent / "static"
@@ -77,16 +78,16 @@ def create_app(directory=None, adapter=None, worker=True):
                 "runtime": "degraded" if service.runtime_error else "running" if service.thread and service.thread.is_alive() else "stopped",
                 "runtime_error": service.runtime_error, "tools": service.adapter.availability(),
                 "data_directory": str(service.directory),
-                **{key: service.store.all(key) for key in ["sources", "policies", "runs", "artifacts", "audit", "trigger_state"]},
+                **{key: public(service.store.all(key)) for key in ["sources", "policies", "runs", "artifacts", "audit", "trigger_state"]},
                 "settings": service.store.get("settings", "general")}
 
     @app.post("/api/sources", status_code=201)
     def add_source(body: Source):
-        return service.save_source(body.model_dump())
+        return public(service.save_source(body.model_dump()))
 
     @app.put("/api/sources/{key}")
     def edit_source(key: str, body: Source):
-        return service.save_source(body.model_dump(), key)
+        return public(service.save_source(body.model_dump(), key))
 
     @app.post("/api/sources/{key}/preflight")
     def preflight(key: str):
@@ -129,27 +130,27 @@ def create_app(directory=None, adapter=None, worker=True):
 
     @app.post("/api/policies", status_code=201)
     def add_policy(body: Policy):
-        return service.save_policy(body.model_dump())
+        return public(service.save_policy(body.model_dump()))
 
     @app.put("/api/policies/{key}")
     def edit_policy(key: str, body: Policy):
-        return service.save_policy(body.model_dump(), key)
+        return public(service.save_policy(body.model_dump(), key))
 
     @app.post("/api/policies/{key}/run", status_code=202)
     def run(key: str):
-        return service.enqueue(key)
+        return public(service.enqueue(key))
 
     @app.post("/api/runs/{key}/cancel")
     def cancel(key: str):
-        return service.cancel(key)
+        return public(service.cancel(key))
 
     @app.post("/api/restore/preview")
     def restore_preview(body: RestorePreview):
-        return service.preview_restore(body.artifact_id, body.target_id)
+        return public(service.preview_restore(body.artifact_id, body.target_id))
 
     @app.post("/api/restore/confirm", status_code=202)
     def restore_confirm(body: RestoreConfirm):
-        return service.confirm_restore(body.token, body.target_name, body.acknowledge_code)
+        return public(service.confirm_restore(body.token, body.target_name, body.acknowledge_code))
 
     @app.put("/api/settings")
     def settings(body: Settings):

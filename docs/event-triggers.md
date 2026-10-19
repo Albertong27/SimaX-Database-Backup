@@ -35,7 +35,7 @@ The observer needs SELECT access to every watched row and column metadata. Postg
 
 The endpoint is `POST http://127.0.0.1:8765/api/triggers/webhook/POLICY_ID`. It remains loopback-only alongside the management app. Use a local integration on the SimaX host; shared network ingress/authentication is not delivered by this milestone. Do not expose the management app through a proxy to make this endpoint public.
 
-Set a separate random signing secret of at least 32 bytes in `.env`, reference its `SIMAX_SECRET_*` variable in the policy, then restart SimaX. Secrets are never entered in the UI. Existing process variables take precedence over `.env`.
+Enter a separate random signing secret of at least 32 bytes in the policy. It is stored encrypted, never returned in API responses, and takes effect without a restart. Leave the field blank when editing to retain the saved secret.
 
 Send a UTF-8 JSON body containing only `event_id` (1–128 ASCII letters, digits, dots, underscores, colons or hyphens; first character alphanumeric). Maximum body size is 4096 bytes. Headers:
 
@@ -54,11 +54,11 @@ Use the included helper from the project root:
 python scripts/send_event.py webhook --policy pol_0123456789abcdef --event-id orders-commit-42
 ```
 
-Use `--env-file`, `--secret-env` or `--base-url http://127.0.0.1:PORT` when needed. The example policy ID must be replaced with a real saved policy ID. Synchronize publisher/runtime clocks. The helper does not print signing secrets.
+Use `--data-dir path/to/data` or `--base-url http://127.0.0.1:PORT` when needed. The helper unlocks the local encrypted catalog using the same OS account and reads the saved policy credentials; it does not read `.env`. The example policy ID must be replaced with a real saved policy ID. Synchronize publisher/runtime clocks. The helper does not print signing secrets.
 
 ## MQTT
 
-Configure an explicit broker host/port, exact topic, optional broker username/password environment reference, and event signing-key reference. Broker credentials and the event signing key are separate. TLS with certificate/hostname verification is default; use `SIMAX_MQTT_CA_CERT` for a private CA. Plain TCP requires choosing the trusted-private-network transport explicitly. Wildcard topics are not accepted.
+Configure an explicit broker host/port, exact topic, optional broker username/password, and event signing secret. Broker credentials and the event signing key are separate. TLS with certificate/hostname verification is default; use `SIMAX_MQTT_CA_CERT` for a private CA. Plain TCP requires choosing the trusted-private-network transport explicitly. Wildcard topics are not accepted.
 
 The subscriber uses Eclipse Paho, MQTT **3.1.1**, QoS **1**, and a **clean session**. Reconnect uses backoff and resubscribes. Subscription rejection or inability to obtain QoS 1 is degraded. Sessions end with the connection; there is no persistent offline queue/session expiry extension. Messages published while disconnected can be lost. Publishers must verify intake through SimaX's policy/run evidence and retry after gaps. A broker publish acknowledgment alone does not prove SimaX accepted the event.
 
@@ -67,10 +67,10 @@ Payloads are at most 4096 bytes and contain only `event_id`, integer `timestamp`
 Retained messages, QoS 0 messages, other topics, bad signatures, expired events and malformed payloads cannot request backups. Invalid messages are discarded; valid duplicate deliveries are harmless. QoS 1 acknowledgments occur only after durable intake (or deliberate rejection/duplicate handling). Persistence failure disconnects without acknowledging and reports degraded intake; clean sessions still require publisher retries after reconnection.
 
 ```sh
-python scripts/send_event.py mqtt --policy pol_0123456789abcdef --event-id sensor-batch-42 --broker broker.example --port 8883 --topic simax/backup
+python scripts/send_event.py mqtt --policy pol_0123456789abcdef --event-id sensor-batch-42
 ```
 
-Add `--username` and `--password-env` for broker authentication. Use `--no-tls` only for a deliberately trusted private broker transport. The helper publishes non-retained QoS 1 messages. For stronger delivery guarantees, durable publisher outboxes and persistent broker sessions need a future integration; no exactly-once transport guarantee is claimed.
+The helper uses the saved broker, transport, topic and credentials. Clear the broker username in the app to remove broker authentication; leave an existing password blank to preserve it. The helper publishes non-retained QoS 1 messages. External publishers must provision the shared signing key through their own secure credential store and implement the signature format above.
 
 ## Validation and upgrade
 

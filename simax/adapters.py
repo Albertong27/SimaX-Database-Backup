@@ -25,9 +25,9 @@ class NativeAdapter:
         executable = shutil.which(tool)
         if not executable:
             raise AdapterError(f"Install {tool} on the runtime host and add it to PATH, then restart SimaX.")
-        password = os.environ.get(source["password_env"])
+        password = source.get("password")
         if password is None:
-            raise AdapterError(f"Set {source['password_env']} on the runtime host, then restart SimaX.")
+            raise AdapterError("Save a database password in the connection settings.")
         # Strip inherited client overrides; connection identity always comes from the saved source.
         env = {k: v for k, v in os.environ.items()
                if not k.startswith(("PG", "MYSQL", "SIMAX_SECRET_"))}

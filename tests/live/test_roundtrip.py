@@ -21,14 +21,19 @@ def connection(role):
     return {"name": f"live-{role}", "engine": ENGINE, "host": "127.0.0.1",
             "port": int(os.environ[f"SIMAX_LIVE_{role.upper()}_PORT"]),
             "database": "simax_fixture", "username": "postgres" if ENGINE == "postgresql" else "root",
-            "password_env": "SIMAX_SECRET_LIVE", "tls": "disable",
+            "password": os.environ["SIMAX_SECRET_LIVE"], "tls": "disable",
             "role": role, "environment": "DISPOSABLE"}
 
 
 def post(client, url, body=None):
     response = client.post(url, json=body)
     assert response.is_success, response.text
-    return response.json()
+    result = response.json()
+    if url == "/api/sources":
+        assert "password" not in result
+        # Direct SQL verification uses the internal decrypted record, never API secrets.
+        return client.app.state.service.store.get("sources", result["id"])
+    return result
 
 
 def finished(client, run):
@@ -134,7 +139,7 @@ def test_corruption_and_bad_credentials_fail_closed(live, monkeypatch):
     finally:
         path.write_bytes(original)
     monkeypatch.setenv("SIMAX_SECRET_WRONG", "deliberately-wrong-test-password")
-    bad = post(client, "/api/sources", {**connection("source"), "name": "bad-password", "password_env": "SIMAX_SECRET_WRONG"})
+    bad = post(client, "/api/sources", {**connection("source"), "name": "bad-password", "password": "deliberately-wrong-test-password"})
     policy = post(client, "/api/policies", {"name": "Must fail", "source_id": bad["id"]})
     run = finished(client, post(client, f"/api/policies/{policy['id']}/run"))
     assert run["status"] == "failed"

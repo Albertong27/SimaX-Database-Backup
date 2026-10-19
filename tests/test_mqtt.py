@@ -179,7 +179,7 @@ def test_tls_and_broker_password_configuration(setup, monkeypatch):
     client, service, _ = setup
     monkeypatch.setenv("SIMAX_SECRET_EVENTS", SECRET)
     monkeypatch.setenv("SIMAX_SECRET_BROKER", "isolated-broker-password")
-    policy = event_policy(client, service, "mqtt", mqtt_username="fixture", mqtt_password_env="SIMAX_SECRET_BROKER")
+    policy = event_policy(client, service, "mqtt", mqtt_username="fixture", mqtt_password="isolated-broker-password")
     transport = Mock()
     monkeypatch.setattr("simax.mqtt.mqtt.Client", Mock(return_value=transport))
     MqttManager(service.events).build(policy)

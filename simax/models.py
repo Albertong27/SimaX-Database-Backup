@@ -1,13 +1,16 @@
-from typing import Literal
+from typing import Annotated, Literal
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
+from pydantic import BaseModel, ConfigDict, Field, StringConstraints, field_validator, model_validator
 
 from .schedules import parse_cron
 
 
 class Input(BaseModel):
     model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
+
+
+Credential = Annotated[str, StringConstraints(strip_whitespace=False, max_length=4096, pattern=r"^[^\x00]*$")]
 
 
 class Source(Input):
@@ -17,7 +20,7 @@ class Source(Input):
     port: int = Field(ge=1, le=65535)
     database: str = Field(pattern=r"^[a-zA-Z_][a-zA-Z0-9_$-]{0,62}$")
     username: str = Field(pattern=r"^[a-zA-Z_][a-zA-Z0-9_.@$-]{0,62}$")
-    password_env: str = Field(pattern=r"^SIMAX_SECRET_[A-Z0-9_]{1,80}$")
+    password: Credential | None = None
     environment: Literal["PROD", "STAGING", "DEV", "DISPOSABLE"] = "DEV"
     role: Literal["source", "target"] = "source"
     tls: Literal["verify-full", "disable"] = "verify-full"
@@ -66,13 +69,13 @@ class Policy(Schedule):
     acknowledge_scan: bool = False
     debounce_seconds: int = Field(default=10, ge=0, le=300)
     cooldown_seconds: int = Field(default=300, ge=60, le=86400)
-    event_secret_env: str = Field(default="SIMAX_SECRET_EVENTS", pattern=r"^SIMAX_SECRET_[A-Z0-9_]{1,80}$")
+    event_secret: Credential | None = None
     mqtt_host: str = Field(default="localhost", pattern=r"^[a-zA-Z0-9][a-zA-Z0-9.:-]{0,252}$")
     mqtt_port: int = Field(default=8883, ge=1, le=65535)
     mqtt_topic: str = Field(default="simax/backup", min_length=1, max_length=200)
     mqtt_tls: bool = True
     mqtt_username: str = Field(default="", max_length=128)
-    mqtt_password_env: str = Field(default="", pattern=r"^(?:SIMAX_SECRET_[A-Z0-9_]{1,80})?$")
+    mqtt_password: Credential | None = None
 
     @field_validator("mqtt_topic")
     @classmethod
@@ -91,8 +94,6 @@ class Policy(Schedule):
             raise ValueError("Use table names from the source preflight inventory, one per line.")
         if len(set(self.change_tables)) != len(self.change_tables):
             raise ValueError("Table selection contains duplicates.")
-        if self.trigger == "mqtt" and bool(self.mqtt_username) != bool(self.mqtt_password_env):
-            raise ValueError("Set both MQTT username and password environment reference, or leave both empty.")
         return self
 
 

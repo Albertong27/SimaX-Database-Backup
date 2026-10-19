@@ -1,11 +1,11 @@
 # Development status — 0.1.0 preview
 
-Date: 2026-10-19. Current branch: `feat/event-triggers`, based on `feat/flexible-schedules`. The PRD remains the target product definition; this milestone does not claim its whole scope is complete.
+Date: 2026-10-19. Current branch: `feat/encrypted-credentials`, based on `feat/event-triggers`. The PRD remains the target product definition; this milestone does not claim its whole scope is complete.
 
 | Area | Delivered | Remaining |
 | --- | --- | --- |
 | Management | Eight design-aligned pages, source/policy forms, preflight, run controls, filters, preferences, audit export | Shared administration and delete/archive flows |
-| Storage | SQLite v2, additive trigger-state/receipt upgrade, durable queue and transactional metadata | Further migrations, pagination, catalog recovery/import |
+| Storage | SQLite v3, encrypted record bodies, legacy credential migration, durable queue and transactional metadata | Further migrations, pagination, catalog recovery/import |
 | Engines | PostgreSQL 17.11/MySQL 8.4.11 native SQL round trips verified on Windows; Oracle/SQL Server connection records | Broader engine/platform/version matrix; Oracle/SQL Server execution |
 | Triggers | Manual, daily, weekly, cron, table/database polling, signed webhook and MQTT | Redis, continuous CDC, durable offline broker delivery |
 | Scope | Whole database with documented native-export limits | Individual objects, dependencies, schema/data-only modes |
@@ -13,11 +13,13 @@ Date: 2026-10-19. Current branch: `feat/event-triggers`, based on `feat/flexible
 | Formats | Single SQL plus manifest | Grouped SQL and authenticated encrypted binary |
 | Restore | Empty disposable target, expiring authorization, repeated checks, table inventory | Production/original targets, mappings, selection, full data/behavior verification |
 | Lifecycle | SHA-256, interrupted-job recovery, queued cancellation | Retention/deletion/pinning, active cancellation, background integrity rescanning |
-| Administration | Single operator, audit history, freshness notices | Sign-in, roles, outgoing alerts and key management |
+| Administration | Encrypted catalog, persistent local key, credential migration, single operator, audit history, freshness notices | Sign-in, roles, outgoing alerts, portable key export/rotation |
 
 ## Validation
 
-- Local result: 81 automated tests passed, including signatures, replay/expiry rejection, durable event coalescing, active-backup follow-ups, scan gaps, source/policy edit races, catalog upgrade and real Paho protocol integration. Scheduling and recovery regressions remain covered. The six live-test cases are opt-in and skipped by the default suite. Python compilation, JavaScript syntax and documentation checks passed.
+- Credential browser checks: new connection save, blank password edit, masked reopen, paused MQTT creation and blank-secret edit passed in `build/ui-credentials`, with no external connections. The signing helper read the encrypted policy and delivered an accepted event to the isolated webhook. Native database tests were rerun with encrypted credential storage.
+
+- Local result: 86 automated tests passed, including seven credential-encryption tests for key lifecycle, migration, API redaction and preserved snapshots. Earlier coverage includes signatures, replay/expiry rejection, durable event coalescing, active-backup follow-ups, scan gaps, source/policy edit races, catalog upgrade and real Paho protocol integration. Scheduling and recovery regressions remain covered. The six live-test cases are opt-in and skipped by the default suite. Python compilation, JavaScript syntax and documentation checks passed.
 - Event browser result: webhook creation, signed helper delivery, completed synthetic export, replay rejection, table selection/scan acknowledgment and paused MQTT configuration passed in `build/ui-events-20261019`. No user database or existing broker was contacted.
 - Schedule browser result: Monday/Friday selection, local offset previews, weekly save/reopen, cron editing, impossible-date errors, six-hour previews, save without running and pause passed in an isolated catalog with its worker disabled. No database connections were made.
 - Earlier browser smoke result: connection creation/persistence, missing-tool preflight, policy creation/run failure, desktop and 390px layouts passed; no browser console errors were observed.

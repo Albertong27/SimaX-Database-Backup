@@ -18,7 +18,7 @@ def event_policy(client, service, trigger="webhook", **changes):
     src, original = make_policy(client)
     body = Policy(name=original["name"], source_id=src["id"], trigger=trigger,
                   acknowledge_scan=True, change_tables=["public.orders"],
-                  debounce_seconds=10, cooldown_seconds=60, **changes).model_dump()
+                  debounce_seconds=10, cooldown_seconds=60, event_secret=SECRET, **changes).model_dump()
     return service.save_policy(body, original["id"])
 
 
@@ -46,7 +46,7 @@ def test_webhook_auth_schema_replay_and_scope(setup, monkeypatch):
     assert webhook(client, policy).status_code == 202
     assert webhook(client, policy).status_code == 409
     assert not service.store.all("runs")  # Accepted is pending, not completed.
-    other = service.save_policy(Policy(name="other", source_id=policy["source_id"], trigger="webhook").model_dump())
+    other = service.save_policy(Policy(name="other", source_id=policy["source_id"], trigger="webhook", event_secret=SECRET).model_dump())
     body = b'{"event_id":"another"}'
     assert client.post(f"/api/triggers/webhook/{other['id']}", content=body, headers=signed(policy, body)).status_code == 401
     assert SECRET not in client.get("/api/state").text
@@ -143,7 +143,7 @@ def test_observation_edit_race_does_not_update_new_revision(setup, monkeypatch):
     {"trigger": "table-change"}, {"trigger": "database-change"},
     {"trigger": "table-change", "acknowledge_scan": True, "change_tables": []},
     {"trigger": "mqtt", "mqtt_topic": "backup/#"},
-    {"trigger": "mqtt", "mqtt_username": "operator"},
+    {"trigger": "mqtt", "mqtt_password": "bad\x00password"},
     {"cooldown_seconds": 0}, {"poll_seconds": 1}, {"event_secret_env": "PATH"},
 ])
 def test_event_configuration_boundaries(changes):
@@ -158,11 +158,12 @@ def test_catalog_v1_upgrade_preserves_existing_records(tmp_path):
     with store.connect() as db:
         db.execute("DROP TABLE trigger_state")
         db.execute("DROP TABLE trigger_receipts")
+        db.execute("UPDATE settings SET body=? WHERE id=?", (json.dumps({"id": "existing", "value": "preserved"}), "existing"))
         db.execute("PRAGMA user_version=1")
     upgraded = Store(tmp_path)
     assert upgraded.get("settings", "existing")["value"] == "preserved"
     with upgraded.connect() as db:
-        assert db.execute("PRAGMA user_version").fetchone()[0] == 2
+        assert db.execute("PRAGMA user_version").fetchone()[0] == 3
         assert db.execute("SELECT COUNT(*) FROM trigger_receipts").fetchone()[0] == 0
 
 
