@@ -8,7 +8,7 @@ The intended scope covers MySQL, PostgreSQL, Oracle Database, and Microsoft SQL 
 
 ## Project documents
 
-The detailed PRD will be developed on `docs/initial-prd` before review into `main`.
+- [Product requirements document](docs/PRD.md)
 
 - [Contributing and branch workflow](CONTRIBUTING.md)
 - [GitHub publication checklist](docs/github-setup.md)
