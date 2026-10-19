@@ -1,0 +1,32 @@
+# Local configuration and secrets
+.env
+.env.*
+!.env.example
+secrets/
+credentials/
+*.pem
+*.key
+
+# Runtime output and real backup data must never be committed.
+/backups/
+/restore-work/
+/data/
+/logs/
+*.log
+*.dump
+*.bak
+*.dmp
+# SQL test fixtures and migrations may be tracked intentionally outside backups/.
+
+# Common build and developer output
+/target/
+/dist/
+/build/
+node_modules/
+.venv/
+__pycache__/
+*.py[cod]
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
