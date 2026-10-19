@@ -1,12 +1,13 @@
 # Contributing
 
-SimaX Database Backup is maintained under Simply Smart X (SimaX). The project is currently defining requirements; implementation choices remain open.
+SimaX Database Backup is maintained under Simply Smart X (SimaX). A local web application with SQLite is under development. The PRD defines the full target scope; see [development status](docs/development-status.md) for implemented capabilities and gaps.
 
 ## Git workflow
 
 - `main` is the reviewed integration branch.
 - Create short-lived branches from current `main`: `docs/<topic>`, `feat/<topic>`, `fix/<topic>`, or `chore/<topic>`.
 - The initial PRD is prepared on `docs/initial-prd`.
+- The initial application is on `feat/web-foundation`, based on `docs/initial-prd` until both changes are reviewed into `main`.
 - Use focused commits with prefixes such as `docs:`, `feat:`, `fix:`, and `chore:`.
 - Submit a pull request explaining the problem, resulting behavior, and relevant validation.
 - Keep changes reviewable; squash merge approved PRs and delete merged branches.
@@ -33,6 +34,12 @@ Run `python scripts/check_docs.py` with Python 3.10+ from the repository root. T
 For new files, stage them before running checks so Git includes them in the tracked file list. Run `git diff --check` before committing.
 
 ## Requirements and design
+
+Application checks require Python 3.12+ and `requirements-dev.txt`. Run `python -m pytest -q`, `python -m compileall -q simax`, and `node --check simax/static/app.js`. Node is used only for syntax checking. Tests use disposable SQLite catalogs and synthetic adapter output, never production databases.
+
+If the Windows default temporary directory is unavailable, pass a fresh directory inside `build/` with pytest's `--basetemp`. Pytest may delete its contents; never point this option at user data. Keep browser-test catalogs separate from `data/`.
+
+Native adapter changes require isolated live-engine backup/restore checks before publishing compatibility claims. Review edits to the supplied reference designs separately from application code.
 
 Keep user problems separate from proposed implementations. Label assumptions, unvalidated targets, and unresolved decisions. Cite official documentation for engine-specific limitations. A capability is supported only after its backup and restore paths have passed a published test matrix.
 

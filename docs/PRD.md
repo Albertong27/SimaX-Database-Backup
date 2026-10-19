@@ -7,7 +7,7 @@
 | Product | SimaX Database Backup |
 | Document version | 0.1 |
 | Date | 2026-10-19, Asia/Jakarta |
-| Status | Draft for product review; no application implementation exists |
+| Status | Draft target requirements; implementation progress is tracked separately in development-status.md |
 | Intended distribution | Open source on GitHub; license and repository owner pending |
 | Accountable owner | Simply Smart X; individual product and engineering owners to be assigned |
 
@@ -312,7 +312,7 @@ A release must publish tested combinations and known limitations. Required combi
 - Select a license, contributor policy, vulnerability-reporting process, release versioning scheme, and package-signing policy before public distribution.
 - Keep the binary format's specification and recovery tooling consistent with the selected open-source license and portability commitments.
 
-Local repository setup and pending hosted settings are tracked in [GitHub setup](github-setup.md). The current workflow validates documentation only; it does not claim application, database, or restore tests have passed.
+Local repository setup and pending hosted settings are tracked in [GitHub setup](github-setup.md). Current implementation and verification boundaries are tracked in [development status](development-status.md); planned requirements must not be presented as delivered capabilities.
 
 ## 13. Risks and required validation
 

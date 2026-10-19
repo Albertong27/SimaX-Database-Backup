@@ -1,0 +1,30 @@
+[build-system]
+requires = ["setuptools>=69"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "simax-database-backup"
+version = "0.1.0"
+description = "Local database backup management by Simply Smart X"
+requires-python = ">=3.12"
+dynamic = ["dependencies"]
+
+[project.scripts]
+simax-backup = "simax.__main__:main"
+
+[tool.setuptools.dynamic]
+dependencies = {file = ["requirements.txt"]}
+
+[tool.setuptools.packages.find]
+include = ["simax*"]
+
+[tool.setuptools.package-data]
+simax = ["static/*.html", "static/*.css", "static/*.js", "static/*.svg", "static/fonts/*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["."]
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"

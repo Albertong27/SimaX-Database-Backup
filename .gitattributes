@@ -3,3 +3,6 @@
 *.jpg binary
 *.ico binary
 *.pdf binary
+*.woff2 binary
+# Preserve the supplied design bundle byte-for-byte.
+"docs/SimaX Database Backup - Design Mockup.html" binary
