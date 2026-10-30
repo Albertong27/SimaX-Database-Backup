@@ -30,6 +30,8 @@ def free_port():
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--engine", choices=("postgresql", "mysql", "all"), default="all")
+    parser.add_argument("--benchmark-mib", type=int, choices=(0, 1, 16, 64, 128, 256, 512, 1024), default=0,
+                        help="Optional synthetic MySQL payload size for a timed restore (not production acceptance)")
     args = parser.parse_args()
     engines = ("postgresql", "mysql") if args.engine == "all" else (args.engine,)
     required = {"postgresql": ("initdb", "pg_ctl", "psql", "pg_dump"),
@@ -124,13 +126,14 @@ def main():
                         time.sleep(0.5)
                     initfile.unlink()
             test_env = {**env, "SIMAX_LIVE_ENGINE": engine,
+                        "SIMAX_LIVE_BENCHMARK_MIB": str(args.benchmark_mib), "SIMAX_LIVE_REPORT_DIR": str(root),
                         "SIMAX_LIVE_SOURCE_PORT": str(ports[0]),
                         "SIMAX_LIVE_TARGET_PORT": str(ports[1])}
             print(f"Testing {engine}: private loopback ports {ports}", flush=True)
             result = subprocess.run([sys.executable, "-m", "pytest", "tests/live", "-v", "-s",
                 "--tb=short", "--basetemp", str(root / f"pytest-{engine}"),
                 "--junitxml", str(root / f"{engine}.xml")], cwd=ROOT, env=test_env,
-                stdout=subprocess.PIPE, stderr=subprocess.STDOUT, timeout=300, **HIDDEN)
+                stdout=subprocess.PIPE, stderr=subprocess.STDOUT, timeout=1200 if args.benchmark_mib else 300, **HIDDEN)
             (root / f"{engine}-tests.log").write_bytes(result.stdout)
             print(result.stdout.decode("utf-8", errors="replace").replace("\r\n", "\n"), flush=True)
             status = status or result.returncode

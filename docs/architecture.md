@@ -14,6 +14,7 @@ The interface follows the supplied PDF and HTML: Schibsted Grotesk text, JetBrai
 | `simax/schedules.py` | Shared schedule calculation, bounded cron parsing and previews |
 | `simax/service.py` | Scheduling, queue execution, policy snapshots, finalization and authorization |
 | `simax/events.py`, `simax/mqtt.py`, `simax/observation.py` | Durable intake, independent observers, broker lifecycle and read-only table fingerprints |
+| `simax/operations.py` | Pure retention eligibility, source matching and protection freshness |
 | `simax/app.py` | Local HTTP boundary, API routes and static assets |
 | `simax/static/` | Forms, navigation, tables, filters and visual styles |
 
@@ -42,7 +43,7 @@ MQTT uses QoS 1 with acknowledgments after persistence, clean sessions and recon
 5. Flush and finalize the companion `manifest.json`.
 6. Register the completed artifact and finish the run.
 
-Partial exports never enter the restorable catalog. A crash after file finalization but before registration can leave an uncataloged backup; reconciliation/import is planned. Partial files remain for manual inspection. No automatic cleanup or retention runs.
+Partial exports never enter the restorable catalog. A crash after file finalization but before registration can leave an uncataloged backup; reconciliation/import is planned. Partial files remain for manual inspection. Opt-in retention follows successful backups and protects a newest-copy floor, pinned copies, valid previews and active restores. Incident holds suspend expiry; existing policies default to keep-all. Cleanup is journaled as deleting/expired and never recursively removes directories. See [recovery operations](mysql-recovery-operations.md).
 
 Checksums verify bytes, not semantic completeness. External deletion or corruption is detected at restore preflight; background rescanning is not implemented. Catalog integrity records the last check, not a continuous guarantee.
 
@@ -50,9 +51,9 @@ PostgreSQL exports omit ownership/grants and cluster-global accounts/tablespaces
 
 ## Restore boundary
 
-Only same-engine, same-major, empty dedicated targets labeled DISPOSABLE are accepted. Original source identity is checked against the immutable run record. Preflight verifies managed path, size, SHA-256, engine/version and target emptiness. Authorization expires after five minutes, is single-use, and requires typing the exact target name and acknowledging SQL execution.
+Only same-engine, same-major (and matching MySQL release series with no older target patch), empty dedicated targets labeled DISPOSABLE are accepted. Original source identity is checked against the immutable run record. Preflight verifies managed path, size, SHA-256, engine/version and target emptiness. Authorization expires after five minutes, is single-use, and requires typing the exact target name and acknowledging SQL execution.
 
-Execution repeats checks and rejects changed target configuration. No concurrent target writers are allowed. PostgreSQL uses one transaction with stop-on-error; MySQL can leave partial changes. After replay, only table names are compared. Row contents, routines, constraints and application behavior still require operator verification; the UI labels the evidence accordingly.
+Execution repeats checks and rejects changed target configuration. No concurrent target writers are allowed. PostgreSQL uses one transaction with stop-on-error; MySQL can leave partial changes. After replay, only table names are compared. Technical recovery timings include queue and execution time and compare against a default 15-minute target; they exclude incident response, provisioning, application checks and cutover. Row contents, routines, constraints and application behavior still require operator verification; the UI labels the evidence accordingly.
 
 A valid checksum does not make SQL safe. Routines and triggers may execute code or have external effects. Use trusted source databases and isolated targets. Production and replacement restores are disabled.
 

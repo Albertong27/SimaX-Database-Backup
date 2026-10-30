@@ -11,6 +11,13 @@ class AdapterError(ValueError):
     pass
 
 
+def mysql_release(value):
+    match = re.search(r"\b(8)\.(\d+)\.(\d+)", value)
+    if not match:
+        raise AdapterError("Could not identify the MySQL 8 release series and patch version.")
+    return tuple(map(int, match.groups()))
+
+
 class NativeAdapter:
     tools = {"postgresql": ("psql", "pg_dump"), "mysql": ("mysql", "mysqldump")}
 
@@ -103,6 +110,8 @@ class NativeAdapter:
             tool_major = re.search(r"(\d+)\.", tool_version)
             if not tool_major or int(tool_major[1]) != major:
                 raise AdapterError("Use a pg_dump client matching the server major version for this preview.")
+        elif mysql_release(tool_version)[:2] != mysql_release(version)[:2]:
+            raise AdapterError("Use mysqldump from the same MySQL release series as the server (8.0 or 8.4, for example).")
         return {"version": version[:160], "major": major, "tables": tables,
                 "tool_version": tool_version[:160]}
 
@@ -132,7 +141,7 @@ class NativeAdapter:
         else:
             args += ["--single-transaction", "--quick", "--routines", "--events", "--triggers",
                      "--hex-blob", "--no-tablespaces", "--set-gtid-purged=OFF",
-                     "--skip-add-drop-table", source["database"]]
+                     "--skip-lock-tables", "--column-statistics=0", "--skip-add-drop-table", source["database"]]
         with path.open("xb") as output:
             self.invoke(args, env, output=output, timeout=3600)
             output.flush()

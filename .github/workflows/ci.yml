@@ -78,3 +78,54 @@ jobs:
             build/live-*/*-tests.log
           if-no-files-found: warn
           retention-days: 14
+  ubuntu-mysql:
+    name: Ubuntu MySQL 8.0 recovery and service
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Install native MySQL and Python dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y mysql-server mysql-client python3.12-venv
+          python3.12 -m venv .venv
+          .venv/bin/python -m pip install -r requirements-dev.txt
+      - name: Exercise isolated native recovery and timed payload verification
+        run: |
+          export PATH="/usr/sbin:$PATH"
+          .venv/bin/python scripts/live_tests.py --engine mysql --benchmark-mib 16
+      - name: Install and smoke test the hardened systemd service
+        run: |
+          sudo useradd --system --user-group --home-dir /var/lib/simax --shell /usr/sbin/nologin simax
+          sudo install -d -m 0755 /opt/simax
+          sudo python3.12 -m venv /opt/simax/venv
+          sudo /opt/simax/venv/bin/python -m pip install .
+          sudo install -m 0644 deploy/ubuntu/simax.service /etc/systemd/system/simax.service
+          sudo systemd-analyze verify /etc/systemd/system/simax.service
+          sudo systemctl daemon-reload
+          sudo systemctl start simax
+          for attempt in $(seq 1 30); do
+            if curl --fail --silent http://127.0.0.1:8765/api/state > /tmp/simax-state.json; then break; fi
+            sleep 1
+          done
+          python3 -c 'import json; s=json.load(open("/tmp/simax-state.json")); assert s["runtime"]=="running"; assert s["sources"]==[]; assert s["settings"]["recovery_target_minutes"]==15'
+          test "$(curl --silent --output /dev/null --write-out '%{http_code}' http://127.0.0.1:8765/api/health/protection)" = 503
+          sudo test -f /var/lib/simax/credentials.key
+          sudo test "$(sudo stat -c '%a' /var/lib/simax/credentials.key)" = 600
+      - name: Stop fixture service
+        if: always()
+        run: sudo systemctl stop simax || true
+      - name: Retain synthetic Ubuntu timing evidence
+        if: always()
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
+        with:
+          name: ubuntu-mysql-recovery-reports
+          path: |
+            build/live-*/*.xml
+            build/live-*/*-tests.log
+            build/live-*/*-recovery-benchmark.json
+          if-no-files-found: warn
+          retention-days: 14

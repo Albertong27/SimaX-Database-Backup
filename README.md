@@ -40,7 +40,7 @@ At startup, SimaX creates a local encryption key if this is a new catalog, and r
 4. Create a manual, scheduled or event-triggered policy; preview upcoming times for schedules, choose a local folder label, then run it. Inspect stages in **Runs** and integrity evidence in **Artifacts**. Quiesce schema changes during export.
 5. For a recovery drill, add a separate empty database, used as a restore target and labeled `DISPOSABLE`. Preview the restore, type the exact target name, and acknowledge execution of trusted SQL.
 
-SQL files are unencrypted. Protect the runtime directory with OS permissions and appropriate volume encryption. Backups are retained indefinitely; automatic deletion is not implemented.
+SQL files are unencrypted. Protect the runtime directory with OS permissions and appropriate volume encryption. Existing policies retain backups indefinitely by default. Optional historical retention expires eligible copies only after a successful backup; pins and incident holds preserve evidence. See [MySQL recovery operations](docs/mysql-recovery-operations.md).
 
 ## Implemented now
 
@@ -49,13 +49,15 @@ SQL files are unencrypted. Protect the runtime directory with OS permissions and
 - SQLite persistence, source create/edit/check, revisioned policies, audit export, filters, and saved freshness preferences.
 - Manual/daily/weekly/five-field cron execution, time-zone-aware previews, durable queues, serialized jobs, duplicate coalescing, queued cancellation, and interrupted-run recovery.
 - Table/database change polling, authenticated webhook and MQTT triggers, durable event coalescing and visible observation gaps. See [event setup and limits](docs/event-triggers.md).
+- Two-hour MySQL policy preset, historical retention with pins/incident holds, protection health probe, and recorded recovery drill timings.
+- Separate Ubuntu backup-server deployment template using the existing scheduler; no production deployment is included.
 - Whole-database logical SQL export to one required local copy, staged finalization, companion manifest, and SHA-256 checks.
-- Guarded same-engine/same-major restore to an empty disposable target, expiring single-use authorization, and execution-time rechecks.
+- Guarded same-engine restore (matching MySQL release series, no older target patch) to an empty disposable target, expiring single-use authorization, and execution-time rechecks.
 - Table-name comparison after SQL replay. This does not verify row contents, every object type, or application behavior.
 
 ## Still planned
 
-Oracle/SQL Server execution; selective objects and dependency closure; Redis triggers and log-based change capture; FTP/SFTP/S3/GCS; grouped SQL and encrypted binary; catalog import; retention/deletion/pinning; broader restore modes; active-job cancellation; shared authentication/roles; outgoing alerts; full recovery verification.
+Oracle/SQL Server execution; selective objects and dependency closure; Redis triggers and log-based change capture; FTP/SFTP/S3/GCS; grouped SQL and encrypted binary; catalog import; immutable/offline copy automation; binary-log archiving/PITR; broader restore modes; active-job cancellation; shared authentication/roles; outgoing alerts; full recovery verification.
 
 Unsupported execution modes are unavailable in the UI and rejected by the API. The original product scope remains in the PRD.
 
@@ -63,6 +65,8 @@ Unsupported execution modes are unavailable in the UI and rejected by the API. T
 
 - [Product requirements document](docs/PRD.md)
 - [Architecture and operational boundaries](docs/architecture.md)
+- [MySQL backup-server and attack recovery](docs/mysql-recovery-operations.md)
+- [Ubuntu service setup](docs/ubuntu-backup-server.md)
 - [Scheduling rules and cron examples](docs/scheduling.md)
 - [Encrypted credentials and key recovery](docs/credentials.md)
 - [Event triggers and publisher setup](docs/event-triggers.md)

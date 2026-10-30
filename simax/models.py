@@ -76,6 +76,11 @@ class Policy(Schedule):
     mqtt_tls: bool = True
     mqtt_username: str = Field(default="", max_length=128)
     mqtt_password: Credential | None = None
+    freshness_minutes: int = Field(default=1440, ge=5, le=525600)
+    retention_enabled: bool = False
+    retention_days: int = Field(default=30, ge=1, le=3650)
+    retention_keep_last: int = Field(default=12, ge=2, le=10000)
+    retention_hold: bool = False
 
     @field_validator("mqtt_topic")
     @classmethod
@@ -110,6 +115,8 @@ class Settings(Input):
     timezone: str = "Asia/Jakarta"
     recovery_limit_hours: int = Field(default=24, ge=1, le=8760)
     restore_test_limit_days: int = Field(default=30, ge=1, le=3650)
+    recovery_target_minutes: int = Field(default=15, ge=1, le=1440)
+    minimum_free_gib: int = Field(default=2, ge=1, le=10240)
 
     @field_validator("timezone")
     @classmethod
@@ -126,3 +133,7 @@ class RestoreConfirm(Input):
     token: str
     target_name: str
     acknowledge_code: bool = False
+
+
+class ArtifactPin(Input):
+    pinned: bool
