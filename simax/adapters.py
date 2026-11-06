@@ -11,6 +11,13 @@ class AdapterError(ValueError):
     pass
 
 
+def mysql_release(value):
+    match = re.search(r"\b(8)\.(\d+)\.(\d+)", value)
+    if not match:
+        raise AdapterError("Could not identify the MySQL 8 release series and patch version.")
+    return tuple(map(int, match.groups()))
+
+
 class NativeAdapter:
     tools = {"postgresql": ("psql", "pg_dump"), "mysql": ("mysql", "mysqldump")}
 
@@ -25,14 +32,15 @@ class NativeAdapter:
         executable = shutil.which(tool)
         if not executable:
             raise AdapterError(f"Install {tool} on the runtime host and add it to PATH, then restart SimaX.")
-        password = os.environ.get(source["password_env"])
+        password = source.get("password")
         if password is None:
-            raise AdapterError(f"Set {source['password_env']} on the runtime host, then restart SimaX.")
+            raise AdapterError("Save a database password in the connection settings.")
         # Strip inherited client overrides; connection identity always comes from the saved source.
         env = {k: v for k, v in os.environ.items()
                if not k.startswith(("PG", "MYSQL", "SIMAX_SECRET_"))}
         if source["engine"] == "postgresql":
-            env.update(PGPASSWORD=password, PGSSLMODE=source["tls"], PGCONNECT_TIMEOUT="10")
+            env.update(PGPASSWORD=password, PGSSLMODE=source["tls"], PGCONNECT_TIMEOUT="10",
+                       PGCLIENTENCODING="UTF8")
             if os.environ.get("SIMAX_PG_SSL_ROOT_CERT"):
                 env["PGSSLROOTCERT"] = os.environ["SIMAX_PG_SSL_ROOT_CERT"]
             args = [executable, "--no-password", "--host", source["host"], "--port", str(source["port"]),
@@ -48,12 +56,14 @@ class NativeAdapter:
             if os.environ.get("SIMAX_MYSQL_SSL_CA"):
                 args += ["--ssl-ca=" + os.environ["SIMAX_MYSQL_SSL_CA"]]
             if not export:
-                args += ["--batch", "--skip-column-names", "--binary-mode"]
+                args += ["--batch", "--skip-column-names", "--binary-mode", "--raw"]
         return args, env
 
-    def invoke(self, args, env, *, output=None, input_file=None, timeout=30):
+    def invoke(self, args, env, *, output=None, input_file=None, input_data=None, timeout=30):
         try:
-            result = subprocess.run(args, env=env, stdin=input_file or subprocess.DEVNULL,
+            result = subprocess.run(args, env=env,
+                                    stdin=None if input_data is not None else input_file or subprocess.DEVNULL,
+                                    input=input_data,
                                     stdout=output or subprocess.PIPE, stderr=subprocess.PIPE,
                                     timeout=timeout, shell=False, check=False)
         except subprocess.TimeoutExpired:
@@ -67,11 +77,11 @@ class NativeAdapter:
 
     def query(self, source, sql):
         args, env = self.command(source)
-        if source["engine"] == "postgresql":
-            args += ["-c", sql]
-        else:
-            args += ["--database=" + source["database"], "--execute=" + sql]
-        return self.invoke(args, env)
+        if source["engine"] == "mysql":
+            args += ["--database=" + source["database"]]
+        # Windows native argv uses the active code page. Feed SQL bytes directly so
+        # Unicode identifiers/data survive regardless of the host console locale.
+        return self.invoke(args, env, input_data=(sql + ";\n").encode("utf-8"))
 
     def inspect(self, source):
         version = self.query(source, "SELECT version()")
@@ -100,6 +110,8 @@ class NativeAdapter:
             tool_major = re.search(r"(\d+)\.", tool_version)
             if not tool_major or int(tool_major[1]) != major:
                 raise AdapterError("Use a pg_dump client matching the server major version for this preview.")
+        elif mysql_release(tool_version)[:2] != mysql_release(version)[:2]:
+            raise AdapterError("Use mysqldump from the same MySQL release series as the server (8.0 or 8.4, for example).")
         return {"version": version[:160], "major": major, "tables": tables,
                 "tool_version": tool_version[:160]}
 
@@ -129,7 +141,7 @@ class NativeAdapter:
         else:
             args += ["--single-transaction", "--quick", "--routines", "--events", "--triggers",
                      "--hex-blob", "--no-tablespaces", "--set-gtid-purged=OFF",
-                     "--skip-add-drop-table", source["database"]]
+                     "--skip-lock-tables", "--column-statistics=0", "--skip-add-drop-table", source["database"]]
         with path.open("xb") as output:
             self.invoke(args, env, output=output, timeout=3600)
             output.flush()

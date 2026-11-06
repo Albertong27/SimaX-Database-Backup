@@ -9,19 +9,30 @@ The interface follows the supplied PDF and HTML: Schibsted Grotesk text, JetBrai
 | Module | Responsibility |
 | --- | --- |
 | `simax/models.py` | Strict request validation and supported configuration modes |
-| `simax/db.py` | SQLite schema, transactions, records and audit events |
+| `simax/db.py`, `simax/vault.py` | SQLite schema, authenticated record encryption, local key custody and audit events |
 | `simax/adapters.py` | Native PostgreSQL/MySQL inspection, export and replay |
+| `simax/schedules.py` | Shared schedule calculation, bounded cron parsing and previews |
 | `simax/service.py` | Scheduling, queue execution, policy snapshots, finalization and authorization |
+| `simax/events.py`, `simax/mqtt.py`, `simax/observation.py` | Durable intake, independent observers, broker lifecycle and read-only table fingerprints |
+| `simax/operations.py` | Pure retention eligibility, source matching and protection freshness |
 | `simax/app.py` | Local HTTP boundary, API routes and static assets |
 | `simax/static/` | Forms, navigation, tables, filters and visual styles |
 
 ## Persistence and execution
 
-`data/simax.sqlite3` uses WAL and foreign-key enforcement. Schema version 1 includes sources, policies, runs, artifacts, audit, settings, schedule occurrences, and restore confirmations. JSON documents have relational keys for policy/source relationships and uniqueness. Passwords are stored only as environment-variable references.
+`data/simax.sqlite3` uses WAL and foreign-key enforcement. Schema version 3 retains sources, policies, runs, artifacts, audit, settings, schedule occurrences, and restore confirmations, and adds trigger state plus timestamped event receipts. JSON documents have relational keys for policy/source relationships and uniqueness. Every JSON body is encrypted using Fernet authenticated encryption, including usernames, passwords, signing secrets and immutable job snapshots. Relational IDs, names, statuses and occurrence/receipt indexes remain plaintext. See [credential custody and migration](credentials.md).
 
 One runtime owns the catalog using an OS file lock; one worker serializes backup and restore jobs. Accepted jobs are persisted before acknowledgment. Restart marks previously running work interrupted and resumes queued work. Allow active native operations to finish before stopping the server. A hard stop can leave partial files or partial restore effects; inspect them before retrying.
 
-Daily schedules use IANA zones and one durable occurrence key per policy/day. Repeated DST times run once at the first occurrence; nonexistent times are skipped. Today's due run can catch up after downtime; earlier days do not. Creating or editing a policy after today's scheduled time takes effect next day. An occurrence during an active backup coalesces into that job and is audited. Pausing prevents new enqueues; accepted jobs remain queued unless cancelled.
+Daily, weekly and numeric five-field cron schedules share the same IANA wall-clock calculator for previews and execution. Repeated DST times run once at the first occurrence; nonexistent times are skipped. Only the latest due occurrence from the current local day can catch up after downtime. An edit's timestamp excludes earlier occurrences. Enqueue rechecks the policy revision within the SQLite transaction to reject a stale scheduler snapshot.
+
+Occurrence keys persist across restarts. Daily/weekly policies use policy/day keys, preserving existing daily records; cron policies use policy/UTC-instant keys. An occurrence during an active backup for the source coalesces into that job and is audited. Scheduled jobs record their intended UTC time. Pausing prevents new enqueues; accepted jobs remain queued unless cancelled. The preview endpoint is read-only and searches up to eight years for up to five future occurrences. See [scheduling rules](scheduling.md).
+
+## Event observation and intake
+
+An event supervisor reconciles MQTT subscriptions and submits at most two independent table scans, leaving backup execution separate. Scans compare row and column fingerprints; they cannot recover transient changes or provide a database-wide transactional observation snapshot. Webhooks and MQTT require policy-bound HMAC signatures and recent timestamps. Event identities are retained for seven days; intake and pending state commit atomically. A pending follow-up survives an active source backup and waits for its policy cooldown. Dispatch commits the run and consumes pending state in one transaction. Policy edits invalidate earlier pending revisions.
+
+MQTT uses QoS 1 with acknowledgments after persistence, clean sessions and reconnect/resubscribe. Invalid/retained messages are discarded. There is no durable offline broker replay guarantee. See [event trigger configuration, scope and failure semantics](event-triggers.md). SQLite v1/v2 catalogs migrate transactionally to encrypted schema 3; legacy secret references require the explicit credential import. Older releases reject schema 3.
 
 ## Backup completion
 
@@ -32,7 +43,7 @@ Daily schedules use IANA zones and one durable occurrence key per policy/day. Re
 5. Flush and finalize the companion `manifest.json`.
 6. Register the completed artifact and finish the run.
 
-Partial exports never enter the restorable catalog. A crash after file finalization but before registration can leave an uncataloged backup; reconciliation/import is planned. Partial files remain for manual inspection. No automatic cleanup or retention runs.
+Partial exports never enter the restorable catalog. A crash after file finalization but before registration can leave an uncataloged backup; reconciliation/import is planned. Partial files remain for manual inspection. Opt-in retention follows successful backups and protects a newest-copy floor, pinned copies, valid previews and active restores. Incident holds suspend expiry; existing policies default to keep-all. Cleanup is journaled as deleting/expired and never recursively removes directories. See [recovery operations](mysql-recovery-operations.md).
 
 Checksums verify bytes, not semantic completeness. External deletion or corruption is detected at restore preflight; background rescanning is not implemented. Catalog integrity records the last check, not a continuous guarantee.
 
@@ -40,9 +51,9 @@ PostgreSQL exports omit ownership/grants and cluster-global accounts/tablespaces
 
 ## Restore boundary
 
-Only same-engine, same-major, empty dedicated targets labeled DISPOSABLE are accepted. Original source identity is checked against the immutable run record. Preflight verifies managed path, size, SHA-256, engine/version and target emptiness. Authorization expires after five minutes, is single-use, and requires typing the exact target name and acknowledging SQL execution.
+Only same-engine, same-major (and matching MySQL release series with no older target patch), empty dedicated targets labeled DISPOSABLE are accepted. Original source identity is checked against the immutable run record. Preflight verifies managed path, size, SHA-256, engine/version and target emptiness. Authorization expires after five minutes, is single-use, and requires typing the exact target name and acknowledging SQL execution.
 
-Execution repeats checks and rejects changed target configuration. No concurrent target writers are allowed. PostgreSQL uses one transaction with stop-on-error; MySQL can leave partial changes. After replay, only table names are compared. Row contents, routines, constraints and application behavior still require operator verification; the UI labels the evidence accordingly.
+Execution repeats checks and rejects changed target configuration. No concurrent target writers are allowed. PostgreSQL uses one transaction with stop-on-error; MySQL can leave partial changes. After replay, only table names are compared. Technical recovery timings include queue and execution time and compare against a default 15-minute target; they exclude incident response, provisioning, application checks and cutover. Row contents, routines, constraints and application behavior still require operator verification; the UI labels the evidence accordingly.
 
 A valid checksum does not make SQL safe. Routines and triggers may execute code or have external effects. Use trusted source databases and isolated targets. Production and replacement restores are disabled.
 
@@ -51,9 +62,11 @@ A valid checksum does not make SQL safe. Routines and triggers may execute code 
 - Loopback-only, single trusted local operator. Shared authentication and roles are not implemented.
 - Host validation, same-origin mutation checks, required application header, no CORS, and restrictive CSP.
 - No shell execution for database commands. Conservative validation of connection identifiers.
-- Only `SIMAX_SECRET_*` credential references are allowed. Inherited database-client overrides are removed; saved identity determines each command.
+- SQL inspection queries are sent as UTF-8 standard input, avoiding Windows argument code-page conversion. PostgreSQL client encoding is explicit; MySQL batch output is raw UTF-8.
+- Credentials are entered through the local app and saved in encrypted records. Password/signing-secret fields are recursively redacted from API responses. Inherited database-client overrides are removed; saved identity determines each command.
 - Native tools receive passwords through their environment. The same OS user or an administrator may inspect that environment; a protected credential broker is future work.
-- TLS identity verification is default. Native stderr is not persisted because it can expose SQL, data or credentials.
+- TLS identity verification is default. Operators may explicitly disable database TLS for a connection, including private-network remote servers; there is no automatic fallback or Tailscale detection. Native stderr is not persisted because it can expose SQL, data or credentials.
+- The CLI does not load `.env` during normal startup. An explicit, stopped-runtime migration imports legacy references and removes imported `SIMAX_SECRET_*` entries after encryption succeeds.
 - OS permissions and protected volumes are required for plaintext backups and private metadata.
 - Audit history is not tamper-evident compliance evidence.
 

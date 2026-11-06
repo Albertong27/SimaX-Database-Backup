@@ -43,7 +43,7 @@ class FixtureAdapter:
 
 def source(name="orders-dev", **changes):
     return {"name": name, "engine": "postgresql", "host": "localhost", "port": 5432,
-            "database": "orders", "username": "backup", "password_env": "SIMAX_SECRET_TEST",
+            "database": "orders", "username": "backup", "password": "super-secret",
             "environment": "DEV", "role": "source", "tls": "disable", **changes}
 
 
@@ -78,7 +78,7 @@ def test_empty_catalog_is_real_and_persistent(setup):
     src, _ = make_policy(client)
     other = Service(service.directory, FixtureAdapter())
     assert other.store.get("sources", src["id"])["name"] == "orders-dev"
-    assert "password" not in other.store.get("sources", src["id"])
+    assert other.store.get("sources", src["id"])["password"] == "super-secret"
     assert other.store.all("audit")
 
 
@@ -86,7 +86,7 @@ def test_source_duplicate_and_no_password_leak(setup):
     client, _, _ = setup
     assert client.post("/api/sources", json=source()).status_code == 201
     assert client.post("/api/sources", json=source()).status_code == 409
-    response = client.post("/api/sources", json={**source("extra"), "password": "secret-value"})
+    response = client.post("/api/sources", json={**source("extra"), "unexpected": "secret-value"})
     assert response.status_code == 422
     assert "secret-value" not in response.text
 
@@ -94,11 +94,24 @@ def test_source_duplicate_and_no_password_leak(setup):
 @pytest.mark.parametrize("changes", [
     {"database": "postgresql://other/server"}, {"database": "x; DROP TABLE x"},
     {"host": "--help"}, {"password_env": "PATH"},
-    {"host": "remote.example", "tls": "disable"}, {"port": 0}
+    {"tls": "prefer"}, {"port": 0}
 ])
 def test_connection_input_boundaries(setup, changes):
     client, _, _ = setup
     assert client.post("/api/sources", json=source(**changes)).status_code == 422
+
+
+@pytest.mark.parametrize("engine", ["postgresql", "mysql"])
+def test_explicit_private_network_plaintext_and_tls_default(setup, engine):
+    client, _, _ = setup
+    body = source(engine=engine, host="100.64.0.10")
+    body.pop("tls")
+    saved = client.post("/api/sources", json=body)
+    assert saved.status_code == 201
+    assert saved.json()["tls"] == "verify-full"
+    edited = client.put(f"/api/sources/{saved.json()['id']}", json={**body, "tls": "disable"})
+    assert edited.status_code == 200
+    assert edited.json()["tls"] == "disable"
 
 
 def test_origin_host_and_mutation_boundaries(setup):
@@ -149,7 +162,7 @@ def test_unsupported_policy_cannot_be_accepted(setup):
     src = client.post("/api/sources", json=source(engine="oracle")).json()
     assert client.post("/api/policies", json={"name": "oracle", "source_id": src["id"]}).status_code == 400
     src = client.post("/api/sources", json=source("second")).json()
-    assert client.post("/api/policies", json={"name": "bad", "source_id": src["id"], "trigger": "webhook"}).status_code == 422
+    assert client.post("/api/policies", json={"name": "bad", "source_id": src["id"], "trigger": "redis"}).status_code == 422
     assert client.post("/api/policies", json={"name": "bad", "source_id": src["id"], "destination": "../outside"}).status_code == 422
     assert client.post("/api/policies", json={"name": "bad", "source_id": src["id"], "timezone": "invalid"}).status_code == 422
 

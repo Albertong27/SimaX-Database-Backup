@@ -6,6 +6,7 @@ secrets/
 credentials/
 *.pem
 *.key
+.key-*
 
 # Runtime output and real backup data must never be committed.
 /backups/

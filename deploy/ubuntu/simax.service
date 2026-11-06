@@ -1,0 +1,34 @@
+[Unit]
+Description=SimaX Database Backup (backup-server pull runtime)
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+Type=simple
+User=simax
+Group=simax
+WorkingDirectory=/opt/simax
+Environment=HOME=/var/lib/simax
+Environment=PYTHONUNBUFFERED=1
+Environment=PYTHONUTF8=1
+ExecStart=/opt/simax/venv/bin/python -m simax --port 8765 --data-dir /var/lib/simax
+Restart=on-failure
+RestartSec=10
+StateDirectory=simax
+StateDirectoryMode=0700
+UMask=0077
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/var/lib/simax
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+CapabilityBoundingSet=
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+TimeoutStopSec=120
+KillMode=control-group
+
+[Install]
+WantedBy=multi-user.target
