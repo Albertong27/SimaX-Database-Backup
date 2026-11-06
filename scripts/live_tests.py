@@ -86,8 +86,12 @@ def main():
                 else:
                     basedir = Path(shutil.which("mysqld")).resolve().parent.parent
                     base = ["mysqld", "--no-defaults", f"--basedir={basedir}", f"--datadir={data}"]
-                    with (home / "init.log").open("wb") as output:
-                        run(base + ["--initialize-insecure"], env=env, stdout=output, stderr=subprocess.STDOUT)
+                    try:
+                        with (home / "init.log").open("wb") as output:
+                            run(base + ["--initialize-insecure"], env=env, stdout=output, stderr=subprocess.STDOUT)
+                    except (subprocess.CalledProcessError, subprocess.TimeoutExpired):
+                        details = (home / "init.log").read_text(encoding="utf-8", errors="replace")
+                        raise RuntimeError("MySQL initialization failed:\n" + details.replace(password, "[REDACTED]")[-8000:]) from None
                     output = cleanup.enter_context(log.open("wb"))
                     initfile = home / "init.sql"
                     initfile.write_text(f"ALTER USER 'root'@'localhost' IDENTIFIED BY '{password}';\nCREATE DATABASE simax_fixture CHARACTER SET utf8mb4;\n", encoding="utf-8")
