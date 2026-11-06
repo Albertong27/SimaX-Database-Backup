@@ -30,6 +30,8 @@ The runner creates a unique `build/live-<id>/` workspace, generates credentials,
 
 On other systems the runner can consume compatible native binaries on PATH, but this milestone makes no Linux/macOS live compatibility claim. Do not set the internal `SIMAX_LIVE_*` environment variables manually; invoke the runner so it provisions isolated endpoints.
 
+The Ubuntu CI job keeps MySQL's AppArmor enforcement enabled and adds a local profile rule limited to this checkout's `build/live-*/mysql-*/` fixture directories. The package profile otherwise denies creation of data directories in the runner workspace. This allowance applies only to the disposable GitHub runner; it does not change developer or production host security settings. Initialization logs are retained as CI artifacts, and initialization errors are included in the job output. See Ubuntu's [AppArmor local override guidance](https://ubuntu.com/server/docs/how-to/security/apparmor/).
+
 ## Acceptance evidence
 
 The successful round trip performs these operations:

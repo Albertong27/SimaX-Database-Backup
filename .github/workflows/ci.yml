@@ -94,10 +94,24 @@ jobs:
           sudo apt-get install -y mysql-server mysql-client python3.12-venv
           python3.12 -m venv .venv
           .venv/bin/python -m pip install -r requirements-dev.txt
+      - name: Allow isolated MySQL directories in the runner AppArmor profile
+        run: |
+          profile=/etc/apparmor.d/usr.sbin.mysqld
+          if sudo test -f "$profile"; then
+            # Keep enforcement enabled; extend only the disposable fixture paths.
+            sudo grep -q 'local/usr.sbin.mysqld' "$profile"
+            printf '"%s/build/live-*/mysql-*/" rw,\n"%s/build/live-*/mysql-*/**" rwk,\n' \
+              "$GITHUB_WORKSPACE" "$GITHUB_WORKSPACE" \
+              | sudo tee -a /etc/apparmor.d/local/usr.sbin.mysqld
+            sudo apparmor_parser -r "$profile"
+          fi
       - name: Exercise isolated native recovery and timed payload verification
         run: |
           export PATH="/usr/sbin:$PATH"
           .venv/bin/python scripts/live_tests.py --engine mysql --benchmark-mib 16
+      - name: Show MySQL confinement failures
+        if: failure()
+        run: sudo journalctl -k --no-pager --since '-15 minutes' | grep 'apparmor="DENIED".*mysqld' || true
       - name: Install and smoke test the hardened systemd service
         run: |
           sudo useradd --system --user-group --home-dir /var/lib/simax --shell /usr/sbin/nologin simax
